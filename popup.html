@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vault Dweller</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <img class="logo" src="icons/icon-mark.png" alt="Vault Dweller" />
+      <div class="topbar-title">Vault Dweller</div>
+
+      <div class="tabs">
+        <div class="tab-thumb"></div>
+        <button class="tab active" data-tab="query">Query</button>
+        <button class="tab" data-tab="datamodel">Models</button>
+      </div>
+
+      <div id="status-pill" class="status-pill disconnected" title="Disconnected">
+        <span class="status-dot"></span>
+        <span id="status-text">Disconnected</span>
+      </div>
+      <div id="topbar-user" class="topbar-user"></div>
+
+      <div id="topbar-chip-slot" class="topbar-chip-slot"></div>
+
+      <button id="history-btn" class="topbar-icon hidden" title="Query history">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+      </button>
+      <button id="whoami-btn" class="topbar-icon hidden" title="User info">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0,-4-4H8a4 4 0 0 0,-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+      </button>
+      <button id="disconnect-btn" class="topbar-icon hidden" title="Disconnect">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
+      <span class="topbar-sep"></span>
+      <button id="expand-btn" class="topbar-icon topbar-icon-accent" title="Open full window">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+      </button>
+      <button id="collapse-btn" class="topbar-icon topbar-icon-accent hidden" title="Back to popup">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+      </button>
+      <button id="close-btn" class="topbar-icon topbar-icon-danger" title="Close">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <!-- Who Am I popover -->
+    <div id="whoami-popover" class="whoami-popover hidden">
+      <div id="user-details"></div>
+    </div>
+
+    <!-- History popover -->
+    <div id="history-popover" class="history-popover hidden">
+      <div class="popover-header">
+        <span>Query History</span>
+        <button id="clear-history-btn" class="btn btn-small btn-text">Clear</button>
+      </div>
+      <div id="history-list"></div>
+    </div>
+
+    <div id="connection-panel" class="hidden"></div>
+    <input type="hidden" id="vault-domain" />
+
+    <!-- VQL Panel -->
+    <div id="vql-panel" class="hidden">
+      <!-- Query Tab -->
+      <div id="tab-query" class="tab-content active">
+        <div class="card query-card">
+          <div id="operator-bar" class="operator-bar">
+            <button class="op-chip" data-op="WHERE" title="Insert WHERE clause">WHERE</button>
+            <button class="op-chip" data-op="AND" title="Insert AND">AND</button>
+            <button class="op-chip" data-op="CONTAINS" title="Insert CONTAINS ('value')">CONTAINS</button>
+            <button class="op-chip" data-op="LIKE" title="Insert LIKE 'pattern'">LIKE</button>
+            <button class="op-chip" data-op="EQ" title="Insert = 'value'">=</button>
+            <div class="date-chip-wrap">
+              <button id="date-chip" class="op-chip" aria-haspopup="true" aria-expanded="false" title="Insert a date literal relative to today">DATE ▾</button>
+              <div id="date-menu" class="date-menu hidden">
+                <button class="date-menu-item" data-days="30">Last 30 days</button>
+                <button class="date-menu-item" data-days="90">Last 90 days</button>
+                <button class="date-menu-item" data-days="180">Last 180 days</button>
+                <button class="date-menu-item" data-days="365">Last 365 days</button>
+                <div class="date-menu-sep"></div>
+                <div class="date-menu-custom">
+                  <span>Last</span>
+                  <input type="number" id="date-years" min="1" max="99" step="1" value="2" />
+                  <span>years</span>
+                  <button id="date-years-go" class="date-menu-go">Insert</button>
+                </div>
+                <div id="date-preview" class="date-preview"></div>
+              </div>
+            </div>
+            <button id="model-chip" class="model-chip" title="Load data model — enables autocomplete">
+              <span class="model-chip-dot"></span>
+              <span class="model-chip-check">&#10003;</span>
+              <span id="model-chip-label" class="model-chip-label">LOAD MODEL</span>
+            </button>
+          </div>
+          <div class="textarea-wrapper">
+            <textarea
+              id="vql-input"
+              rows="4"
+              placeholder="SELECT id, name__v, status__v FROM documents"
+              spellcheck="false"
+            ></textarea>
+            <div id="autocomplete-dropdown" class="autocomplete-dropdown hidden"></div>
+          </div>
+          <div class="query-actions">
+            <button id="run-btn" class="btn btn-primary" title="Runs the query and fetches ALL pages concurrently. For stable paging on large sets, include an ORDER BY.">Run Query</button>
+            <button id="cancel-btn" class="btn btn-outline hidden" title="Stop fetching further pages and discard partial results">Cancel</button>
+            <button id="clear-btn" class="btn btn-outline">Clear</button>
+            <span id="query-time" class="query-meta"></span>
+          </div>
+        </div>
+
+        <div id="results-panel" class="results-panel">
+          <div id="results-header" class="results-header hidden">
+            <span id="results-count"></span>
+            <button id="copy-btn" class="btn btn-small btn-outline">Copy JSON</button>
+            <button id="export-csv-btn" class="btn btn-small btn-outline">Export CSV</button>
+            <button id="export-xlsx-btn" class="btn btn-small btn-outline">Export Excel</button>
+          </div>
+          <div id="results-container"></div>
+          <div id="save-bar" class="save-bar hidden">
+            <span id="save-bar-count">0 changes</span>
+            <button id="discard-btn" class="btn btn-small btn-outline">Discard</button>
+            <button id="save-btn" class="btn btn-small btn-primary">Save Changes</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Data Models Tab -->
+      <div id="tab-datamodel" class="tab-content">
+        <div class="dm-panel">
+          <div class="dm-head">
+            <img class="dm-head-logo" src="icons/icon-mark.png" alt="" />
+            <span class="dm-head-title">Data model</span>
+            <span id="dm-counts" class="dm-counts"></span>
+          </div>
+
+          <div class="dm-search-field">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/></svg>
+            <input type="text" id="dm-search" placeholder="Search objects and fields…" />
+            <button id="dm-search-clear" class="dm-search-clear hidden" title="Clear search">&times;</button>
+          </div>
+
+          <div id="dm-filters" class="dm-filters hidden">
+            <button class="dm-filter active" data-filter="fields">Fields <span id="dm-n-fields">0</span></button>
+            <button class="dm-filter" data-filter="objects">Objects <span id="dm-n-objects">0</span></button>
+            <span class="dm-groupnote">by object</span>
+          </div>
+
+          <div id="dm-tree" class="dm-tree"></div>
+
+          <div id="dm-more" class="dm-more hidden">
+            <span id="dm-showing"></span>
+            <button id="dm-show-more" class="dm-show-more">Show more</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

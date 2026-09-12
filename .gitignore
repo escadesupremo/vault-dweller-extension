@@ -1,0 +1,44 @@
+# OS junk
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Packaged extension builds
+*.zip
+*.crx
+*.pem
+*.xpi
+dist/
+build/
+web-ext-artifacts/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log
+
+# Android
+*.apk
+*.aab
+*.keystore
+*.jks
+local.properties
+.gradle/
+android/build/
+
+# iOS
+*.ipa
+xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Secrets — never commit Vault tokens or API keys
+.env
+.env.*
+secrets.json

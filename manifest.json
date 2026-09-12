@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "Vault Dweller",
+  "version": "1.0.0",
+  "description": "Vault Dweller — Query, explore, and edit your Veeva Vault data model with VQL.",
+  "permissions": [
+    "cookies",
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*.veevavault.com/*"
+  ],
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.veevavault.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["popup.html", "popup.css", "popup.js", "icons/*"],
+      "matches": ["https://*.veevavault.com/*"]
+    }
+  ]
+}
