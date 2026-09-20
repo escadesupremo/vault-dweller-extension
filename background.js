@@ -401,7 +401,10 @@ async function askAnthropic(key, system, messages) {
     },
     body: JSON.stringify({
       model: "claude-opus-5",
-      max_tokens: 4096,
+      // Thinking is on by default on this model and is billed against
+      // max_tokens, so 4096 truncated answers mid-sentence. This is the
+      // documented floor for a non-streaming request.
+      max_tokens: 16000,
       // Chat answers over retrieved text don't repay deep reasoning.
       output_config: { effort: "medium" },
       system: system,
@@ -410,11 +413,23 @@ async function askAnthropic(key, system, messages) {
   });
   const body = await resp.json();
   if (!resp.ok) throw new Error(body?.error?.message || `HTTP ${resp.status}`);
-  return (body.content || [])
+
+  // A refusal returns HTTP 200 with no text, which would otherwise surface as
+  // "the model returned an empty answer".
+  if (body.stop_reason === "refusal") {
+    throw new Error("The model declined to answer that question.");
+  }
+
+  const text = (body.content || [])
     .filter((b) => b.type === "text")
     .map((b) => b.text)
     .join("\n")
     .trim();
+
+  // Say so rather than letting a sentence stop halfway with no explanation.
+  return body.stop_reason === "max_tokens"
+    ? `${text}\n\n[Answer cut off at the length limit — ask for a specific part to see the rest.]`
+    : text;
 }
 
 async function askOpenAI(key, system, messages) {
@@ -429,7 +444,11 @@ async function askOpenAI(key, system, messages) {
   });
   const body = await resp.json();
   if (!resp.ok) throw new Error(body?.error?.message || `HTTP ${resp.status}`);
-  return (body.choices?.[0]?.message?.content || "").trim();
+  const choice = body.choices?.[0];
+  const text = (choice?.message?.content || "").trim();
+  return choice?.finish_reason === "length"
+    ? `${text}\n\n[Answer cut off at the length limit — ask for a specific part to see the rest.]`
+    : text;
 }
 
 async function askGemini(key, system, messages) {

@@ -2395,6 +2395,11 @@ async function loadDocTypes() {
     const listed = await apiCall("/metadata/objects/documents/types");
     if (!apiOk(listed)) {
       setDtChipState("failed", { title: `Couldn't list types: ${apiErr(listed)}` });
+      // The tree was blanked to a spinner before this call; say what happened
+      // rather than leaving it spinning with the reason hidden in a tooltip.
+      dtTree.innerHTML = `<div class="dm-empty">Couldn't list document types.<br />${esc(
+        apiErr(listed)
+      )}</div>`;
       return;
     }
 
@@ -2569,8 +2574,12 @@ async function countDocTypeRecords() {
       t.docCount = Number.isFinite(reported)
         ? reported
         : (res.data?.data || []).length;
+      // Clear the other side, or a recount that succeeds keeps reporting the
+      // previous failure in the button and the row tooltips.
+      t.countError = null;
     } else {
       t.countError = apiErr(res);
+      t.docCount = null;
     }
     done++;
     dtCountBtn.textContent = `Counting… ${done}/${total}`;
@@ -2989,6 +2998,9 @@ let askPlatform = "platform";
 let askSource = "vault_api_reference";
 let askTurns = [];
 let askBusy = false;
+// Bumped by "new conversation"; an in-flight answer from an older epoch is
+// discarded rather than landing in the fresh thread.
+let askEpoch = 0;
 // The newest question's node — what the log scrolls to and reserves room for.
 let askLastQuestion = null;
 
@@ -3489,6 +3501,22 @@ async function refreshAskAvailability() {
   if (ready) fitAskLog();
 }
 
+// Replays only exchanges that completed. Dropping a failed answer on its own
+// would leave two user turns next to each other, which Anthropic and Gemini
+// reject outright — one failed question would poison the rest of the thread.
+function askHistory() {
+  const out = [];
+  for (let i = 0; i < askTurns.length; i++) {
+    const q = askTurns[i];
+    const a = askTurns[i + 1];
+    if (q.role !== "user") continue;
+    if (!a || a.role !== "assistant" || a.error) continue;
+    out.push({ role: "user", content: q.content });
+    out.push({ role: "assistant", content: a.content });
+  }
+  return out;
+}
+
 async function sendAsk(text) {
   const question = (text ?? askInput.value).trim();
   if (!question || askBusy) return;
@@ -3507,16 +3535,30 @@ async function sendAsk(text) {
   askPinQuestion();
 
   const ctx = buildVaultContext(question);
-  const res = await chrome.runtime.sendMessage({
-    action: "aiChat",
-    platform: askPlatform,
-    source: askSource,
-    vaultContext: ctx.text,
-    // Failed turns are not replayed; the pending placeholder is DOM-only.
-    messages: askTurns
-      .filter((t) => !t.error)
-      .map((t) => ({ role: t.role, content: t.content })),
-  });
+  // A "new conversation" mid-flight must not let this answer land in the
+  // cleared thread, where it would become an assistant turn with no question
+  // in front of it and break the next request.
+  const epoch = askEpoch;
+
+  let res;
+  try {
+    res = await chrome.runtime.sendMessage({
+      action: "aiChat",
+      platform: askPlatform,
+      source: askSource,
+      vaultContext: ctx.text,
+      messages: askHistory().concat([{ role: "user", content: question }]),
+    });
+  } catch (err) {
+    // A closed port rejects rather than returning; without this the composer
+    // would stay disabled for good.
+    res = { success: false, error: err?.message || "The extension worker is unavailable." };
+  } finally {
+    askBusy = false;
+    askSend.disabled = false;
+  }
+
+  if (epoch !== askEpoch) return;
 
   const answer = res?.success
     ? {
@@ -3536,8 +3578,6 @@ async function sendAsk(text) {
   // again to hold the question at the top.
   askPinQuestion();
 
-  askBusy = false;
-  askSend.disabled = false;
   // preventScroll matters: the composer sits below the log, so a plain focus()
   // scrolls the page down to reveal it and undoes the pin.
   askInput.focus({ preventScroll: true });
@@ -3577,6 +3617,7 @@ askLog.addEventListener("click", async (e) => {
 askClear.addEventListener("click", () => {
   askTurns = [];
   askLastQuestion = null;
+  askEpoch++;
   renderAskLog();
   askInput.focus({ preventScroll: true });
 });
