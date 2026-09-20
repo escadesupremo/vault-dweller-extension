@@ -449,12 +449,19 @@ input[type="text"]::placeholder {
 .whoami-identity-main {
   display: flex;
   align-items: center;
-  gap: 10px;
+  /* Wraps rather than competing: the chips are wide enough that on a narrow
+     popover they squeezed the login down to an ellipsis. Below the basis
+     below, they drop to their own line and the address gets the full width. */
+  flex-wrap: wrap;
+  gap: 6px 10px;
   flex: 1;
   min-width: 0;
 }
 
-.whoami-who { min-width: 0; }
+.whoami-who {
+  flex: 1 1 200px;
+  min-width: 0;
+}
 
 .whoami-name {
   font-size: 12.5px;
@@ -1861,7 +1868,12 @@ textarea::placeholder { color: var(--text-faint); }
   flex-shrink: 0;
 }
 
+/* The label and the API name share one row, and without a shrink order both
+   ellipsise together — "Audit Rep…" beside "audit_report_…", neither readable.
+   The API name gives up its space first so the human-readable label survives. */
 .dt-node-label {
+  flex-shrink: 1;
+  min-width: 0;
   font-weight: 600;
   color: var(--text);
   overflow: hidden;
@@ -1870,6 +1882,11 @@ textarea::placeholder { color: var(--text-faint); }
 }
 
 .dt-node-sublabel {
+  /* Deliberately extreme: shrink is distributed in proportion to factor × width,
+     so a modest factor still costs the label a few characters. This says "give
+     up everything before the label loses a letter". */
+  flex-shrink: 200;
+  min-width: 0;
   color: var(--text-hint);
   font-size: 10px;
   font-family: var(--mono);
@@ -2503,6 +2520,16 @@ body.mode-window #vql-panel[data-active-tab="ask"] #tab-ask {
 body.mode-window #tab-ask .ask-panel { flex: 1; min-height: 0; }
 body.mode-window #tab-ask .ask-log { flex: 1; height: auto; overflow-y: auto; }
 
+/* Capped on the message, not the log: the code card sits inside the message
+   body, so this gives code and prose the same measure. Without it the card
+   fills the window while the prose beside it wraps wherever the model put its
+   newlines, and the two no longer line up. */
+body.mode-window #tab-ask .ask-msg { max-width: 78ch; }
+
+/* The composer lines up with the conversation above it: left at full width it
+   was a single-line input stretching well past the column it belongs to. */
+body.mode-window #tab-ask .ask-field { max-width: calc(78ch + 24px); }
+
 @media (prefers-reduced-motion: reduce) {
   .ask-answer,
   .ask-expand,
@@ -2661,6 +2688,22 @@ body.mode-window #vql-panel[data-active-tab="doctypes"] #tab-doctypes {
 }
 body.mode-window #tab-doctypes .dt-layout { flex: 1; height: auto; min-height: 0; }
 
+/* 42% of a 660px overlay is a sensible tree; 42% of a full-width column is a
+   lot of space for type names and leaves the fields cramped. */
+body.mode-window .dt-tree-panel {
+  width: clamp(300px, 34%, 520px);
+  container-type: inline-size;
+}
+
+/* Under this the API name is squeezed to nothing anyway — it measured 0px wide
+   while still costing the row its gap. Drop it and give the label the space;
+   the full name is still in the row's tooltip and the detail pane. Scoped to
+   this mode by the container above: in the overlay nothing is a container, so
+   the rule never matches and that layout is unchanged. */
+@container (max-width: 420px) {
+  .dt-node-sublabel { display: none; }
+}
+
 body.mode-window .topbar-chip-slot {
   display: flex;
   margin-left: auto;
@@ -2702,6 +2745,10 @@ body.mode-window .history-popover {
   margin: 0;
 }
 
+/* Wider than the history list: at 320px the login line ellipsises and the
+   profile and vault chips are forced onto separate rows. */
+body.mode-window .whoami-popover { width: 380px; }
+
 body.mode-window .history-popover { box-shadow: var(--shadow-pop); }
 
 body.mode-window #vql-panel {
@@ -2717,7 +2764,9 @@ body.mode-window #tab-datamodel {
   display: flex;
   flex-direction: column;
   order: -1;
-  width: 288px;
+  /* Scales with the window so object and field names stop truncating on a wide
+     screen; 288px stays the floor, so a small window is unchanged. */
+  width: clamp(288px, 22vw, 420px);
   flex-shrink: 0;
   min-height: 0;
   background: var(--white);
@@ -2761,3 +2810,14 @@ body.mode-window #tab-query {
 
 body.mode-window #tab-query .query-card,
 body.mode-window #tab-query .results-panel { margin-bottom: 0; flex-shrink: 0; }
+
+/* A query is a short statement; an editor the width of a monitor is no easier
+   to read for being wide. Results are left uncapped — a table with a dozen
+   columns genuinely uses the space, and capping it would add a scrollbar where
+   the screen has room. */
+body.mode-window #tab-query .query-card { max-width: 1000px; }
+
+body.mode-window .results-table td { max-width: 420px; }
+
+/* Yields before the tab strip does when the topbar runs out of room. */
+body.mode-window .topbar-user { min-width: 0; max-width: 28ch; }
