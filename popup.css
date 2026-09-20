@@ -414,42 +414,14 @@ input[type="text"]::placeholder {
 
 /* Sticky so the only close button stays reachable when the panel scrolls in
    full-window mode. */
-.whoami-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  height: 30px;
-  padding: 0 10px;
-  background: var(--ink);
-}
-
-.whoami-head-logo {
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-}
-
-.whoami-head-title {
-  font-family: var(--display);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: var(--paper);
-}
-
-/* Sits on the dark header, so it reads as closing the whole popover. */
 .whoami-close {
-  margin-left: auto;
+  flex-shrink: 0;
   width: 20px;
   height: 20px;
   background: transparent;
   border: 0;
   border-radius: var(--radius-2xs);
-  color: rgba(244, 241, 230, .55);
+  color: var(--text-faint);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
@@ -457,23 +429,30 @@ input[type="text"]::placeholder {
 }
 
 .whoami-close:hover {
-  color: var(--paper);
-  background: rgba(244, 241, 230, .12);
+  color: var(--text);
+  background: var(--btn-soft);
 }
 
 /* Identity strip — recessed against the white body so it reads as part of the
    header block rather than as a second section competing with AI access. */
+/* With the header bar gone this strip is the top of the card, and it carries
+   the close button beside the identity that popup.js injects. */
 .whoami-identity {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
+  padding: 8px 10px 8px 12px;
   background: var(--paper);
   border-bottom: 1px solid var(--border);
 }
 
-/* Populated by popup.js; an empty strip would leave a stray rule under the head. */
-.whoami-identity:empty { display: none; }
+.whoami-identity-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
 
 .whoami-who { min-width: 0; }
 

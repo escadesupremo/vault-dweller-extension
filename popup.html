@@ -51,14 +51,12 @@
 
     <!-- Who Am I popover — one panel: session identity strip over AI access -->
     <div id="whoami-popover" class="whoami-popover hidden">
-      <div class="whoami-head">
-        <img class="whoami-head-logo" src="icons/icon-mark.png" alt="" />
-        <span class="whoami-head-title">Session</span>
+      <!-- #user-details is injected by popup.js, so the close button is a
+           sibling rather than a child — an innerHTML write would remove it. -->
+      <div class="whoami-identity">
+        <div id="user-details" class="whoami-identity-main"></div>
         <button id="whoami-close" class="whoami-close" type="button" title="Close">&times;</button>
       </div>
-
-      <!-- Rows are injected by popup.js; the strip reads as a continuation of the header. -->
-      <div id="user-details" class="whoami-identity"></div>
 
       <!-- AI access: provider, key, one save-and-verify action, persistent status -->
       <div class="whoami-body">
