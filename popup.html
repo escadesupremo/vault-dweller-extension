@@ -16,6 +16,8 @@
         <div class="tab-thumb"></div>
         <button class="tab active" data-tab="query">Query</button>
         <button class="tab" data-tab="datamodel">Models</button>
+        <button class="tab" data-tab="doctypes">Doc Types</button>
+        <button class="tab" data-tab="ask">Ask</button>
       </div>
 
       <div id="status-pill" class="status-pill disconnected" title="Disconnected">
@@ -47,9 +49,54 @@
       </button>
     </div>
 
-    <!-- Who Am I popover -->
+    <!-- Who Am I popover — one panel: session identity strip over AI access -->
     <div id="whoami-popover" class="whoami-popover hidden">
-      <div id="user-details"></div>
+      <div class="whoami-head">
+        <img class="whoami-head-logo" src="icons/icon-mark.png" alt="" />
+        <span class="whoami-head-title">Session</span>
+        <button id="whoami-close" class="whoami-close" type="button" title="Close">&times;</button>
+      </div>
+
+      <!-- Rows are injected by popup.js; the strip reads as a continuation of the header. -->
+      <div id="user-details" class="whoami-identity"></div>
+
+      <!-- AI access: provider, key, one save-and-verify action, persistent status -->
+      <div class="whoami-body">
+        <div class="whoami-section">AI access</div>
+
+        <div id="ai-provider" class="ai-tiles">
+          <button class="ai-tile active" data-provider="anthropic">Anthropic</button>
+          <button class="ai-tile" data-provider="openai">OpenAI</button>
+          <button class="ai-tile" data-provider="gemini">Gemini</button>
+        </div>
+
+        <div class="ai-field">
+          <div class="ai-field-label">API key</div>
+          <div class="ai-key-field">
+            <input type="password" id="ai-key-input" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" />
+            <button id="ai-key-reveal" class="ai-key-reveal" type="button">show</button>
+          </div>
+        </div>
+
+        <div class="ai-actions">
+          <button id="ai-key-save" class="ai-btn ai-btn-primary">Save &amp; verify</button>
+          <button id="ai-key-clear" class="ai-btn ai-btn-soft">Remove</button>
+        </div>
+
+        <div id="ai-key-status" class="ai-status none">
+          <span class="ai-status-dot"></span>
+          <div class="ai-status-copy">
+            <div id="ai-status-title" class="ai-status-title"></div>
+            <div id="ai-status-note" class="ai-status-note"></div>
+          </div>
+        </div>
+
+        <!-- PRIVACY_URL: set before building; build.ps1 refuses to package the
+             placeholder. -->
+        <a id="privacy-link" class="whoami-privacy"
+           href="PRIVACY_URL_PLACEHOLDER"
+           target="_blank" rel="noopener noreferrer">Privacy policy &#8599;</a>
+      </div>
     </div>
 
     <!-- History popover -->
@@ -65,7 +112,7 @@
     <input type="hidden" id="vault-domain" />
 
     <!-- VQL Panel -->
-    <div id="vql-panel" class="hidden">
+    <div id="vql-panel" class="hidden" data-active-tab="query">
       <!-- Query Tab -->
       <div id="tab-query" class="tab-content active">
         <div class="card query-card">
@@ -92,11 +139,18 @@
                 <div id="date-preview" class="date-preview"></div>
               </div>
             </div>
-            <button id="model-chip" class="model-chip" title="Load data model — enables autocomplete">
-              <span class="model-chip-dot"></span>
-              <span class="model-chip-check">&#10003;</span>
-              <span id="model-chip-label" class="model-chip-label">LOAD MODEL</span>
-            </button>
+            <div id="chip-group" class="chip-group">
+              <button id="model-chip" class="model-chip" title="Load data model — enables autocomplete">
+                <span class="model-chip-dot"></span>
+                <span class="model-chip-check">&#10003;</span>
+                <span id="model-chip-label" class="model-chip-label">LOAD MODEL</span>
+              </button>
+              <button id="dt-chip" class="model-chip" title="Load document types and the fields on each layout">
+                <span class="model-chip-dot"></span>
+                <span class="model-chip-check">&#10003;</span>
+                <span id="dt-chip-label" class="model-chip-label">LOAD TYPES</span>
+              </button>
+            </div>
           </div>
           <div class="textarea-wrapper">
             <textarea
@@ -134,7 +188,9 @@
 
       <!-- Data Models Tab -->
       <div id="tab-datamodel" class="tab-content">
-        <div class="dm-panel">
+        <div id="dm-empty-state" class="dm-empty">Use <strong>LOAD MODEL</strong> on the Query tab.</div>
+
+        <div id="dm-panel" class="dm-panel hidden">
           <div class="dm-head">
             <img class="dm-head-logo" src="icons/icon-mark.png" alt="" />
             <span class="dm-head-title">Data model</span>
@@ -158,6 +214,63 @@
           <div id="dm-more" class="dm-more hidden">
             <span id="dm-showing"></span>
             <button id="dm-show-more" class="dm-show-more">Show more</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Document Types Tab -->
+      <div id="tab-doctypes" class="tab-content">
+        <div id="dt-empty" class="dm-empty">Use <strong>LOAD TYPES</strong> on the Query tab.</div>
+
+        <div id="dt-layout" class="dt-layout hidden">
+          <div class="dt-tree-panel">
+            <div class="dt-sortbar">
+              <button id="dt-count-btn" class="dt-count-btn">Count records</button>
+              <button id="dt-sort-dir" class="dt-sort-dir" title="Sort by record count" disabled>&#8597;</button>
+            </div>
+            <div id="dt-tree" class="dt-tree"></div>
+          </div>
+          <div class="dt-detail-panel">
+            <div id="dt-breadcrumb" class="dt-breadcrumb"></div>
+            <div id="dt-stats" class="dt-stats hidden">
+              <div class="dt-stats-row">
+                <span id="dt-field-count" class="dt-stat"></span>
+              </div>
+            </div>
+            <div id="dt-fields" class="dt-fields"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ask (Vault docs) Tab -->
+      <div id="tab-ask" class="tab-content">
+        <div id="ask-nokey" class="dm-empty">Add an API key under the <strong>user</strong> button to start.</div>
+
+        <div id="ask-panel" class="ask-panel hidden">
+          <div class="ask-scope">
+            <span class="ask-scope-label">Scope</span>
+            <div class="ask-pill-wrap">
+              <button id="ask-platform" class="ask-pill" aria-haspopup="true" aria-expanded="false" title="Vault application family">
+                <span class="ask-pill-text">Platform</span><span class="ask-pill-caret">&#9662;</span>
+              </button>
+              <div id="ask-platform-menu" class="ask-menu hidden"></div>
+            </div>
+            <div class="ask-pill-wrap">
+              <button id="ask-source" class="ask-pill" aria-haspopup="true" aria-expanded="false" title="Which documentation set to search">
+                <span class="ask-pill-text">API reference</span><span class="ask-pill-caret">&#9662;</span>
+              </button>
+              <div id="ask-source-menu" class="ask-menu hidden"></div>
+            </div>
+            <button id="ask-clear" class="ask-icon-btn" title="Start a new conversation">&times;</button>
+          </div>
+
+          <div id="ask-log" class="ask-log"></div>
+
+          <div class="ask-composer">
+            <div class="ask-field">
+              <textarea id="ask-input" rows="1" placeholder="Ask about the Vault API…" spellcheck="false"></textarea>
+              <button id="ask-send" class="ask-send" title="Send">&#8593;</button>
+            </div>
           </div>
         </div>
       </div>

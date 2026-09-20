@@ -14,8 +14,10 @@
       right: "20px",
       width: "660px",
       // Height tracks the panel's own content (see vault-dweller-height below),
-      // so only the width is user-resizable.
+      // so only the width is user-resizable. It is eased rather than snapped:
+      // the panel reports a new height whenever an answer lands or opens.
       height: "300px",
+      transition: "height .22s cubic-bezier(.4, 0, .2, 1)",
       minWidth: "360px",
       maxWidth: "calc(100vw - 40px)",
       maxHeight: "calc(100vh - 40px)",
@@ -38,9 +40,27 @@
       display: "block",
     });
 
+    // The panel sizes its conversation to the room actually available. It
+    // cannot read that itself: inside the iframe the viewport is whatever
+    // height we just gave it, so asking there would be circular.
+    iframe.addEventListener("load", postSpace);
+
     wrap.appendChild(iframe);
     document.documentElement.appendChild(wrap);
   }
+
+  function postSpace() {
+    const iframe = document.getElementById(IFRAME_ID);
+    if (!iframe || !iframe.contentWindow) return;
+    // Addressed to the extension origin rather than "*", so the message is not
+    // delivered if the frame is ever navigated elsewhere.
+    iframe.contentWindow.postMessage(
+      { type: "vault-dweller-space", height: window.innerHeight - 40 },
+      new URL(chrome.runtime.getURL("popup.html")).origin
+    );
+  }
+
+  window.addEventListener("resize", postSpace);
 
   function toggle() {
     const existing = document.getElementById(WRAP_ID);

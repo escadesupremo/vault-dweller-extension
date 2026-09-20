@@ -18,7 +18,16 @@ const domainInput = $("#vault-domain");
 const disconnectBtn = $("#disconnect-btn");
 const whoamiBtn = $("#whoami-btn");
 const whoamiPopover = $("#whoami-popover");
+const whoamiClose = $("#whoami-close");
 const userDetails = $("#user-details");
+const aiProviderTiles = $("#ai-provider");
+const aiKeyInput = $("#ai-key-input");
+const aiKeyReveal = $("#ai-key-reveal");
+const aiKeySave = $("#ai-key-save");
+const aiKeyClear = $("#ai-key-clear");
+const aiKeyStatus = $("#ai-key-status");
+const aiStatusTitle = $("#ai-status-title");
+const aiStatusNote = $("#ai-status-note");
 const vqlInput = $("#vql-input");
 const runBtn = $("#run-btn");
 const cancelBtn = $("#cancel-btn");
@@ -45,6 +54,8 @@ const datePreview = $("#date-preview");
 // Data model refs
 const modelChip = $("#model-chip");
 const modelChipLabel = $("#model-chip-label");
+const dmPanel = $("#dm-panel");
+const dmEmptyState = $("#dm-empty-state");
 const dmCounts = $("#dm-counts");
 const dmSearch = $("#dm-search");
 const dmSearchField = $(".dm-search-field");
@@ -87,7 +98,7 @@ if (WINDOW_MODE) {
   document.body.classList.add("mode-window");
   // The chip reads as model state next to the vault identity here, rather than
   // as one more control in the operator row.
-  topbarChipSlot.appendChild(modelChip);
+  topbarChipSlot.appendChild($("#chip-group"));
   expandBtn.classList.add("hidden");
   collapseBtn.classList.remove("hidden");
 }
@@ -174,7 +185,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     if (tab?.url) {
       const url = new URL(tab.url);
-      if (url.hostname.includes("veevavault.com")) {
+      if (isVaultHost(url.hostname)) {
         domainInput.value = url.hostname;
         autoConnect(url.hostname);
       }
@@ -191,56 +202,105 @@ $$(".tab").forEach((tab) => {
     $$(".tab-content").forEach((c) => c.classList.remove("active"));
     tab.classList.add("active");
     $(`#tab-${tab.dataset.tab}`).classList.add("active");
+    // Full-window mode force-shows panes as a sidebar plus a main column, so the
+    // layout has to know which pane owns the main column.
+    vqlPanel.dataset.activeTab = tab.dataset.tab;
+    if (tab.dataset.tab === "ask") refreshAskAvailability();
   });
 });
 
-// Segmented tab indicator + drag-to-switch.
-// Paints --tab-idx via a MutationObserver so manual classList toggles elsewhere
-// in this file (e.g. after disconnect) update the thumb too.
-// Note: $$ returns a NodeList — convert to Array so findIndex works.
-(function initTabIndicator() {
-  const tabsEl = $(".tabs");
-  if (!tabsEl) return;
-  const buttons = Array.from($$(".tab"));
-  tabsEl.style.setProperty("--tab-count", buttons.length);
+// Segmented control: sliding thumb + drag-to-switch, used by the topbar tabs.
+// The thumb is measured from real geometry rather than an equal-share
+// calculation: options are flex:1 but cannot shrink below their label, so they
+// are genuinely unequal, and the topbar hides one option in full-window mode.
+// Whoever sets `.active` owns selection; this just follows it.
+function initSegmented(rootEl, optSelector, thumbSelector) {
+  if (!rootEl) return () => {};
+  const thumb = rootEl.querySelector(thumbSelector);
+  const opts = Array.from(rootEl.querySelectorAll(optSelector));
+  if (!thumb || !opts.length) return () => {};
 
   const paint = () => {
-    const idx = buttons.findIndex((b) => b.classList.contains("active"));
-    if (idx >= 0) tabsEl.style.setProperty("--tab-idx", idx);
+    const active = opts.find((b) => b.classList.contains("active"));
+    // No layout yet (panel still hidden) or the active option isn't rendered.
+    if (!active || active.offsetParent === null) {
+      thumb.style.opacity = "0";
+      return;
+    }
+    // offsetLeft/offsetWidth, not getBoundingClientRect: rects are in
+    // transformed coordinates, and the popover this can sit inside animates a
+    // scale() on open — measuring mid-animation would bake the scale into the
+    // CSS lengths. Both roots are position:relative, so an option's offsetParent
+    // is the root, which is also the thumb's containing block.
+    if (!active.offsetWidth) {
+      thumb.style.opacity = "0";
+      return;
+    }
+    thumb.style.opacity = "1";
+    thumb.style.left = `${active.offsetLeft}px`;
+    thumb.style.width = `${active.offsetWidth}px`;
   };
+
   paint();
   const obs = new MutationObserver(paint);
-  buttons.forEach((b) => obs.observe(b, { attributes: true, attributeFilter: ["class"] }));
+  opts.forEach((b) => obs.observe(b, { attributes: true, attributeFilter: ["class"] }));
+
+  // Label widths move once the webfont lands, and the overlay is resizable.
+  window.addEventListener("resize", paint);
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(paint).catch(() => {});
+  }
 
   // Press-and-drag across the bar to switch. The native click on pointerdown
   // handles the initial selection; pointermove fires .click() only when the
-  // hit-tested tab changes, so we don't double-trigger the active button.
-  const tabAtX = (clientX) => {
-    const r = tabsEl.getBoundingClientRect();
-    const inner = r.width - 4;
-    const i = Math.floor(((clientX - r.left - 2) / inner) * buttons.length);
-    return buttons[Math.max(0, Math.min(buttons.length - 1, i))];
+  // hit-tested option changes, so we don't double-trigger the active one.
+  const optAtX = (clientX) => {
+    const visible = opts.filter((b) => b.offsetParent !== null);
+    if (!visible.length) return null;
+    let nearest = visible[0];
+    let nearestGap = Infinity;
+    for (const b of visible) {
+      const r = b.getBoundingClientRect();
+      if (clientX >= r.left && clientX <= r.right) return b;
+      const gap = clientX < r.left ? r.left - clientX : clientX - r.right;
+      if (gap < nearestGap) {
+        nearestGap = gap;
+        nearest = b;
+      }
+    }
+    return nearest;
   };
-  tabsEl.addEventListener("pointerdown", (e) => {
+
+  rootEl.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
-    tabsEl.classList.add("dragging");
-    let last = tabAtX(e.clientX);
+    rootEl.classList.add("dragging");
+    let last = optAtX(e.clientX);
     const onMove = (ev) => {
-      const t = tabAtX(ev.clientX);
-      if (t !== last) { last = t; t.click(); }
+      const t = optAtX(ev.clientX);
+      if (t && t !== last) { last = t; t.click(); }
     };
     const onUp = () => {
-      tabsEl.classList.remove("dragging");
+      rootEl.classList.remove("dragging");
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   });
-})();
+
+  return paint;
+}
+
+const paintTabThumb = initSegmented($(".tabs"), ".tab", ".tab-thumb");
 
 // ===================== CONNECTION =====================
 async function autoConnect(domain) {
+  // The one gate every connection passes through, whether the domain came from
+  // a tab, from storage, or from the field.
+  if (!isVaultHost(domain)) {
+    setStatus("disconnected", "Not a Vault domain.");
+    return;
+  }
   setStatus("connecting", "Connecting...");
   chrome.storage.local.set({ vaultDomain: domain });
 
@@ -318,26 +378,43 @@ function setStatus(type, text) {
   statusPill.title = connectedInWindow ? `Connected — ${state.domain}` : text;
 }
 
+// Who, where, and with what rights — the three things worth knowing at a glance.
+// user_name__v is the login and is usually the same string as user_email__v, so
+// showing both said one thing twice; the rest (vault id, the duplicate address)
+// moved into the tooltip rather than costing a row each.
 function showUserInfo(data) {
   const u = data.users?.[0]?.user || data;
-  const fields = [];
-  if (u.user_name__v) fields.push(["User", u.user_name__v]);
-  if (u.user_first_name__v && u.user_last_name__v)
-    fields.push(["Name", `${u.user_first_name__v} ${u.user_last_name__v}`]);
-  if (u.user_email__v) fields.push(["Email", u.user_email__v]);
-  if (u.security_profile__v) fields.push(["Security Profile", u.security_profile__v]);
-  if (u.vault_id__v) fields.push(["Vault ID", u.vault_id__v]);
+  const name = [u.user_first_name__v, u.user_last_name__v].filter(Boolean).join(" ");
+  const login = u.user_name__v || u.user_email__v || "";
+  const primary = name || login;
 
-  if (fields.length === 0) {
-    fields.push(["Response", JSON.stringify(data).slice(0, 200)]);
+  if (!primary) {
+    // Unexpected payload shape — show it rather than an empty panel.
+    userDetails.innerHTML = `<div class="whoami-raw">${esc(
+      JSON.stringify(data).slice(0, 200)
+    )}</div>`;
+  } else {
+    const secondary = login && login !== primary ? login : "";
+    const chips = [u.security_profile__v, state.domain].filter(Boolean);
+    const tip = [
+      name && login ? `${name} · ${login}` : primary,
+      u.user_email__v && u.user_email__v !== login ? u.user_email__v : "",
+      u.vault_id__v ? `Vault ID ${u.vault_id__v}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    userDetails.innerHTML =
+      `<div class="whoami-who" title="${esc(tip)}">` +
+      `<div class="whoami-name">${esc(primary)}</div>` +
+      (secondary ? `<div class="whoami-login">${esc(secondary)}</div>` : "") +
+      "</div>" +
+      (chips.length
+        ? `<div class="whoami-chips">${chips
+            .map((c) => `<span class="whoami-chip">${esc(c)}</span>`)
+            .join("")}</div>`
+        : "");
   }
-
-  userDetails.innerHTML = fields
-    .map(
-      ([label, value]) =>
-        `<div class="detail"><span class="label">${esc(label)}</span><span class="value">${esc(value)}</span></div>`
-    )
-    .join("");
   whoamiBtn.classList.remove("hidden");
 
   const who = [u.user_email__v || u.user_name__v, u.security_profile__v].filter(Boolean);
@@ -351,6 +428,7 @@ function showVqlPanel() {
   disconnectBtn.classList.remove("hidden");
   historyBtn.classList.remove("hidden");
   vqlInput.focus();
+  paintTabThumb();
 }
 
 // ===================== DISCONNECT =====================
@@ -370,12 +448,21 @@ disconnectBtn.addEventListener("click", () => {
   topbarUser.textContent = "";
   dmCounts.textContent = "";
   setChipState("idle");
+  dmPanel.classList.add("hidden");
+  dmEmptyState.classList.remove("hidden");
   dmTree.innerHTML = "";
   dmExpanded.clear();
   dmShowAll.clear();
   fieldStats = {};
   fieldStatsFailed.clear();
   clearTimeout(fieldStatsTimer);
+  docTypes = [];
+  dtSelected = null;
+  dtLayout.classList.add("hidden");
+  dtTree.innerHTML = "";
+  dtFields.innerHTML = "";
+  dtEmpty.classList.remove("hidden");
+  setDtChipState("idle");
   resultsContainer.innerHTML = "";
   resultsHeader.classList.add("hidden");
   queryTime.textContent = "";
@@ -391,8 +478,13 @@ function closeAllPopovers() {
 whoamiBtn.addEventListener("click", () => {
   const wasHidden = whoamiPopover.classList.contains("hidden");
   closeAllPopovers();
-  if (wasHidden) whoamiPopover.classList.remove("hidden");
+  if (wasHidden) {
+    whoamiPopover.classList.remove("hidden");
+    refreshAiKeyState();
+  }
 });
+
+whoamiClose.addEventListener("click", closeAllPopovers);
 
 historyBtn.addEventListener("click", () => {
   const wasHidden = historyPopover.classList.contains("hidden");
@@ -870,8 +962,16 @@ exportCsvBtn.addEventListener("click", () => {
   URL.revokeObjectURL(url);
 });
 
+// Excel, Sheets and LibreOffice treat a leading =, +, @, tab or CR as the
+// start of a formula, so a value stored in Vault can run on whoever opens the
+// export. The apostrophe forces the cell to text and is stripped on display.
+// A leading "-" is left alone for a plain negative number — prefixing those
+// would turn real figures into text.
 function csvEsc(val) {
-  const str = String(val);
+  let str = String(val);
+  const formulaRisk =
+    /^[=+@\t\r]/.test(str) || (str.startsWith("-") && !/^-\d+(\.\d+)?$/.test(str));
+  if (formulaRisk) str = `'${str}`;
   if (str.includes(",") || str.includes('"') || str.includes("\n")) return `"${str.replace(/"/g, '""')}"`;
   return str;
 }
@@ -1115,30 +1215,46 @@ clearHistoryBtn.addEventListener("click", () => {
 // it carries all four phases: idle, loading (with progress), loaded, failed.
 let modelLoading = false;
 
-function setChipState(phase, opts = {}) {
-  modelChip.classList.remove("loading", "loaded", "failed");
-  modelChip.style.backgroundImage = "";
+// Both loaders — the data model and the document types — are long, progress-
+// bearing fetches, so they share one chip with four phases. Parameterised rather
+// than duplicated so the two can't drift apart.
+function applyChipState(chip, labelEl, phase, labels, opts = {}) {
+  chip.classList.remove("loading", "loaded", "failed");
+  chip.style.backgroundImage = "";
 
   if (phase === "loading") {
     const { done = 0, total = 0 } = opts;
     const pct = total ? Math.round((done / total) * 100) : 0;
-    modelChip.classList.add("loading");
-    modelChip.style.backgroundImage =
+    chip.classList.add("loading");
+    chip.style.backgroundImage =
       `linear-gradient(90deg, rgba(192,138,46,.45) ${pct}%, transparent ${pct}%)`;
-    modelChipLabel.textContent = total ? `${done}/${total}` : "LOADING";
-    modelChip.title = opts.title || "Loading data model";
+    labelEl.textContent = total ? `${done}/${total}` : "LOADING";
+    chip.title = opts.title || labels.loadingTitle;
   } else if (phase === "loaded") {
-    modelChip.classList.add("loaded");
-    modelChipLabel.textContent = "MODELS";
-    modelChip.title = opts.title || "Reload data model";
+    chip.classList.add("loaded");
+    labelEl.textContent = labels.loaded;
+    chip.title = opts.title || labels.loadedTitle;
   } else if (phase === "failed") {
-    modelChip.classList.add("failed");
-    modelChipLabel.textContent = "FAILED";
-    modelChip.title = opts.title || "Load failed — click to retry";
+    chip.classList.add("failed");
+    labelEl.textContent = "FAILED";
+    chip.title = opts.title || "Load failed — click to retry";
   } else {
-    modelChipLabel.textContent = "LOAD MODEL";
-    modelChip.title = "Load data model — enables autocomplete";
+    labelEl.textContent = labels.idle;
+    chip.title = labels.idleTitle;
   }
+}
+
+const MODEL_CHIP_LABELS = {
+  idle: "LOAD MODEL",
+  idleTitle: "Load data model — enables autocomplete",
+  loading: "LOADING",
+  loadingTitle: "Loading data model",
+  loaded: "MODELS",
+  loadedTitle: "Reload data model",
+};
+
+function setChipState(phase, opts = {}) {
+  applyChipState(modelChip, modelChipLabel, phase, MODEL_CHIP_LABELS, opts);
 }
 
 modelChip.addEventListener("click", () => {
@@ -1416,13 +1532,19 @@ function fieldRowHtml(f, objName, filter) {
 }
 
 function renderDataModelTree(filter) {
+  // Before anything is loaded the panel chrome says nothing useful, so it stays
+  // out of the way entirely — same shape as the Doc Types tab.
   if (!state.dataModel) {
+    dmPanel.classList.add("hidden");
+    dmEmptyState.classList.remove("hidden");
     dmFilters.classList.add("hidden");
     dmMore.classList.add("hidden");
-    dmTree.innerHTML =
-      '<div class="dm-empty">No data model loaded. Use the <strong>LOAD MODEL</strong> chip to fetch it.</div>';
+    dmTree.innerHTML = "";
     return;
   }
+
+  dmPanel.classList.remove("hidden");
+  dmEmptyState.classList.add("hidden");
 
   const objects = state.dataModel.objects;
   dmSearchField.classList.toggle("filled", !!filter);
@@ -1571,6 +1693,9 @@ function insertIntoQuery(text, replace = false) {
   $$(".tab-content").forEach((c) => c.classList.remove("active"));
   $('[data-tab="query"]').classList.add("active");
   $("#tab-query").classList.add("active");
+  // Full-window mode picks the main column off this attribute.
+  vqlPanel.dataset.activeTab = "query";
+  paintTabThumb();
 
   if (replace) {
     vqlInput.value = text;
@@ -2176,425 +2301,1288 @@ function showSaveError(msg) {
 }
 
 // ===================== DOC TYPES =====================
+// Two calls to enumerate: list the types, then follow each type's own link to
+// get its properties[] — Vault has no page-layout endpoint, so the field set
+// comes back as part of the type.
+const dtChip = $("#dt-chip");
+const dtChipLabel = $("#dt-chip-label");
+const dtLayout = $("#dt-layout");
+const dtEmpty = $("#dt-empty");
+const dtCountBtn = $("#dt-count-btn");
+const dtSortDir = $("#dt-sort-dir");
 const dtTree = $("#dt-tree");
 const dtBreadcrumb = $("#dt-breadcrumb");
 const dtFields = $("#dt-fields");
+const dtStats = $("#dt-stats");
+const dtFieldCount = $("#dt-field-count");
 
-let docTypesLoaded = false;
-let docProperties = null; // all document field definitions
-let dtSelection = null; // { type, subtype, classification } names
+const DT_BATCH = 5;          // concurrent type fetches
 
-// Load doc types on first tab visit
-$$(".tab").forEach((tab) => {
-  const origHandler = tab._dtHandler;
-  tab.addEventListener("click", () => {
-    if (tab.dataset.tab === "datatypes") {
-      renderDataTypes();
-    }
-  });
+let docTypes = [];
+let dtSelected = null;
+let dtSortDirection = null; // null | "desc" | "asc"
+let dtCounting = false;
+let dtLoading = false;
+
+// An HTTP 200 from Vault can still be a failure; the real verdict is in the body.
+function apiOk(result) {
+  return !!result?.success && result.data?.responseStatus !== "FAILURE";
+}
+
+function apiErr(result) {
+  return (
+    result?.data?.errors?.[0]?.message ||
+    result?.error ||
+    "Vault returned no explanation"
+  );
+}
+
+// The type list hands back absolute links that already carry /api/vXX.X/. Reduce
+// them to a path so the request still goes through the background worker's
+// versioning rule — and never follow a link pointing off our own vault.
+function vaultPath(link) {
+  if (!link) return null;
+  try {
+    const u = new URL(link);
+    if (state.domain && u.hostname !== state.domain) return null;
+    return u.pathname + (u.search || "");
+  } catch (e) {
+    return link.startsWith("/") ? link : "/" + link;
+  }
+}
+
+// Single quotes are the only thing that can break out of a VQL literal.
+function vqlStr(s) {
+  return String(s == null ? "" : s).replace(/'/g, "''");
+}
+
+const DT_CHIP_LABELS = {
+  idle: "LOAD TYPES",
+  idleTitle: "Load document types and the fields on each layout",
+  loading: "LOADING",
+  loadingTitle: "Loading document types",
+  loaded: "TYPES",
+  loadedTitle: "Reload document types",
+};
+
+function setDtChipState(phase, opts = {}) {
+  applyChipState(dtChip, dtChipLabel, phase, DT_CHIP_LABELS, opts);
+}
+
+dtChip.addEventListener("click", () => {
+  if (dtLoading) return;
+  loadDocTypes();
 });
 
 async function loadDocTypes() {
-  docTypesLoaded = true;
-  dtTree.innerHTML = '<div class="dm-empty"><span class="spinner"></span> Loading types...</div>';
-
-  // Load types and properties in parallel
-  const [typesResult, propsResult] = await Promise.all([
-    apiCall("/metadata/objects/documents/types"),
-    docProperties ? Promise.resolve({ success: true, data: { properties: docProperties } }) : apiCall("/metadata/objects/documents/properties"),
-  ]);
-
-  if (!typesResult.success) {
-    dtTree.innerHTML = `<div class="dm-empty">Failed to load types: ${esc(typesResult.error)}</div>`;
+  if (dtLoading) return;
+  if (!state.sessionId) {
+    setDtChipState("failed", { title: "Connect to a Vault first" });
     return;
   }
 
-  // Cache properties
-  if (propsResult.success) {
-    const rawProps = propsResult.data?.properties || propsResult.data || [];
-    docProperties = Array.isArray(rawProps) ? rawProps : [];
-  }
+  dtLoading = true;
+  setDtChipState("loading", { title: "Listing document types…" });
+  dtTree.innerHTML = '<div class="dt-children-loading"><span class="spinner"></span> Loading…</div>';
+  dtFields.innerHTML = "";
+  dtBreadcrumb.innerHTML = "";
+  dtStats.classList.add("hidden");
+  dtSelected = null;
 
-  const types = typesResult.data?.types || typesResult.data || [];
-  renderDocTypeTree(types);
+  try {
+    // Call 1 — the list. `label` is display text; the API name is the last
+    // segment of `value` and is never derived from the label.
+    const listed = await apiCall("/metadata/objects/documents/types");
+    if (!apiOk(listed)) {
+      setDtChipState("failed", { title: `Couldn't list types: ${apiErr(listed)}` });
+      return;
+    }
+
+    const raw = listed.data?.types || [];
+    const types = raw.map((t) => {
+      const link = t.value || "";
+      const tail = link.split("/").pop() || "";
+      return {
+        label: t.label || tail || "(unnamed)",
+        name: t.name || tail,
+        link,
+        properties: null,
+        subtypes: [],
+        error: null,
+      };
+    });
+
+    if (!types.length) {
+      setDtChipState("loaded", { title: "No document types in this vault" });
+      dtEmpty.textContent = "This vault has no document types.";
+      return;
+    }
+
+    // Call 2 — one per type, following the link Vault handed back.
+    let done = 0;
+    for (let i = 0; i < types.length; i += DT_BATCH) {
+      const batch = types.slice(i, i + DT_BATCH);
+      await Promise.all(
+        batch.map(async (t) => {
+          const path = vaultPath(t.link);
+          if (!path) {
+            t.error = "type link missing or points off-domain";
+            return;
+          }
+          const res = await apiCall(path);
+          if (!apiOk(res)) {
+            t.error = apiErr(res);
+            return;
+          }
+          t.properties = res.data?.properties || [];
+          t.subtypes = res.data?.subtypes || [];
+        })
+      );
+      done += batch.length;
+      setDtChipState("loading", {
+        done,
+        total: types.length,
+        title: `Fetching fields… ${done}/${types.length}`,
+      });
+    }
+
+    docTypes = types;
+    renderDocTypeList();
+    dtLayout.classList.remove("hidden");
+    dtEmpty.classList.add("hidden");
+
+    const failed = types.filter((t) => t.error).length;
+    const withFields = types.filter((t) => t.properties).length;
+    const summary =
+      `${types.length} types · ${withFields} with fields` + (failed ? ` · ${failed} failed` : "");
+    setDtChipState("loaded", { title: `${summary} — click to reload` });
+
+  } catch (err) {
+    setDtChipState("failed", { title: `Load failed: ${err.message}` });
+  } finally {
+    dtLoading = false;
+  }
 }
 
-function renderDocTypeTree(types) {
-  if (!types.length) {
-    dtTree.innerHTML = '<div class="dm-empty">No document types found</div>';
-    return;
-  }
+function renderDocTypeList() {
+  // Record count descending puts the types people actually use at the top;
+  // A-Z is the predictable default.
+  // A-Z until counts exist and the arrow asks for a count order.
+  const ordered = [...docTypes].sort((a, b) => {
+    if (dtSortDirection) {
+      const av = a.docCount ?? -1;
+      const bv = b.docCount ?? -1;
+      const diff = dtSortDirection === "desc" ? bv - av : av - bv;
+      if (diff) return diff;
+    }
+    return a.label.localeCompare(b.label);
+  });
 
   let html = "";
-  for (const t of types) {
-    const name = t.name || t.name__v || "";
-    const label = t.label || t.label__v || name;
-    html += `<div class="dt-node" data-type="${esc(name)}">`;
-    html += `<div class="dt-node-header" data-type="${esc(name)}">`;
-    html += `<span class="dt-node-arrow">&#9654;</span>`;
+  for (const t of ordered) {
+    const sub = t.subtypes && t.subtypes.length ? ` · ${t.subtypes.length} subtypes` : "";
+    const tip = t.error
+      ? t.error
+      : `${t.name}${sub}` +
+        (t.docCount != null ? ` · ${t.docCount.toLocaleString()} documents` : "") +
+        (t.countError ? ` · count failed: ${t.countError}` : "") +
+        (t.properties ? ` · ${t.properties.length} fields` : "");
+
+    let cell;
+    if (t.docCount != null) {
+      cell =
+        `<span class="dt-type-count counted t${countTier(t.docCount)}">` +
+        `${esc(compactCount(t.docCount))}</span>`;
+    } else if (t.countError) {
+      cell = '<span class="dt-type-count failed">!</span>';
+    } else {
+      // Not counted yet: the quiet field tally, as before.
+      const fieldCount = t.error ? "!" : t.properties ? String(t.properties.length) : "–";
+      cell = `<span class="dt-type-count">${esc(fieldCount)}</span>`;
+    }
+
+    html += `<div class="dt-node" data-name="${esc(t.name)}">`;
+    html += `<div class="dt-node-header" title="${esc(tip)}">`;
     html += `<span class="dt-node-icon">&#128196;</span>`;
-    html += `<span class="dt-node-label">${esc(label)}</span>`;
-    html += `<span class="dt-node-sublabel">${esc(name)}</span>`;
-    html += `</div>`;
-    html += `<div class="dt-children"></div>`;
-    html += `</div>`;
+    html += `<span class="dt-node-label">${esc(t.label)}</span>`;
+    html += `<span class="dt-node-sublabel">${esc(t.name)}</span>`;
+    html += cell;
+    html += `</div></div>`;
   }
   dtTree.innerHTML = html;
 }
 
-// Tree click handler — expand/collapse + select + lazy load children
-dtTree?.addEventListener("click", async (e) => {
-  const header = e.target.closest(".dt-node-header");
-  if (!header) return;
+// Depth of tint, not length of bar. Document counts in a vault run from single
+// digits to millions; a bar scaled to the largest type would leave every other
+// row empty, and scaling it logarithmically would draw a proportion the data
+// does not support. One hue, five steps, deeper = bigger — and the exact figure
+// sits on top, so magnitude is never carried by colour alone.
+function countTier(n) {
+  if (n === 0) return 0;
+  if (n < 100) return 1;
+  if (n < 1000) return 2;
+  if (n < 10000) return 3;
+  if (n < 100000) return 4;
+  return 5;
+}
 
-  const node = header.closest(".dt-node");
-  const typeName = node.dataset.type;
-  const subtypeName = node.dataset.subtype;
-  const classificationName = node.dataset.classification;
-
-  // Build selection
-  const selection = {};
-  if (classificationName) {
-    // It's a classification node — find parent subtype and type
-    const subtypeNode = node.closest("[data-subtype]").closest(".dt-node[data-type]")
-      ? node.parentElement.closest(".dt-node[data-subtype]")
-      : node.parentElement.closest("[data-subtype]");
-    const typeNode = node.closest(".dt-children")?.closest(".dt-children")?.closest(".dt-node[data-type]")
-      || node.closest(".dt-node[data-type]");
-    selection.type = typeNode?.dataset.type;
-    selection.subtype = subtypeName || node.closest(".dt-children")?.closest(".dt-node")?.dataset.subtype;
-    selection.classification = classificationName;
-  } else if (subtypeName) {
-    const typeNode = node.closest(".dt-children")?.closest(".dt-node[data-type]");
-    selection.type = typeNode?.dataset.type || typeName;
-    selection.subtype = subtypeName;
-  } else {
-    selection.type = typeName;
+// Exact while it fits the column, compact past it; the row tooltip always
+// carries the full figure.
+function compactCount(n) {
+  if (n < 10000) return n.toLocaleString();
+  if (n < 1000000) {
+    const k = n / 1000;
+    return `${k < 100 ? k.toFixed(1).replace(/\.0$/, "") : Math.round(k)}K`;
   }
+  const m = n / 1000000;
+  return `${m < 10 ? m.toFixed(1).replace(/\.0$/, "") : Math.round(m)}M`;
+}
 
-  // Select this node visually
-  dtTree.querySelectorAll(".dt-node-header.selected").forEach((h) => h.classList.remove("selected"));
-  header.classList.add("selected");
-  dtSelection = selection;
-
-  // Show fields for selection
-  displayDocTypeFields(selection);
-
-  // Toggle expand
-  const isExpanded = node.classList.contains("expanded");
-  if (isExpanded) {
-    node.classList.remove("expanded");
-    return;
-  }
-
-  node.classList.add("expanded");
-
-  // Lazy load children if not loaded yet
-  const childrenEl = node.querySelector(":scope > .dt-children");
-  if (childrenEl && childrenEl.children.length === 0) {
-    await loadChildren(node, selection, childrenEl);
-  }
+dtSortDir.addEventListener("click", () => {
+  if (dtSortDir.disabled) return;
+  dtSortDirection = dtSortDirection === "desc" ? "asc" : "desc";
+  dtSortDir.textContent = dtSortDirection === "desc" ? "↓" : "↑";
+  dtSortDir.classList.add("active");
+  dtSortDir.title =
+    dtSortDirection === "desc" ? "Most records first" : "Fewest records first";
+  renderDocTypeList();
 });
 
-async function loadChildren(node, selection, childrenEl) {
-  childrenEl.innerHTML = '<div class="dt-children-loading"><span class="spinner"></span> Loading...</div>';
+// One button, one query per type: SELECT id FROM documents WHERE type__v = '<label>'.
+// responseDetails.total carries the full count, so PAGESIZE 1 keeps the payload
+// tiny while still answering "how many".
+dtCountBtn.addEventListener("click", countDocTypeRecords);
 
-  let endpoint, childKey, childType;
+async function countDocTypeRecords() {
+  if (dtCounting || !docTypes.length || !state.sessionId) return;
 
-  if (selection.subtype && !selection.classification) {
-    // Load classifications for this subtype
-    endpoint = `/metadata/objects/documents/types/${selection.type}/subtypes/${selection.subtype}`;
-    childKey = "classifications";
-    childType = "classification";
-  } else if (selection.type && !selection.subtype) {
-    // Load subtypes for this type
-    endpoint = `/metadata/objects/documents/types/${selection.type}`;
-    childKey = "subtypes";
-    childType = "subtype";
-  } else {
-    childrenEl.innerHTML = "";
-    node.querySelector(".dt-node-arrow")?.classList.add("empty");
+  dtCounting = true;
+  dtCountBtn.disabled = true;
+  const total = docTypes.length;
+  let done = 0;
+
+  const runOne = async (t) => {
+    const q = `SELECT id FROM documents WHERE type__v = '${vqlStr(t.label)}' PAGESIZE 1`;
+    const res = await apiCall("/query", "POST", `q=${encodeURIComponent(q)}`);
+    if (apiOk(res)) {
+      const reported = Number(res.data?.responseDetails?.total);
+      t.docCount = Number.isFinite(reported)
+        ? reported
+        : (res.data?.data || []).length;
+    } else {
+      t.countError = apiErr(res);
+    }
+    done++;
+    dtCountBtn.textContent = `Counting… ${done}/${total}`;
+  };
+
+  try {
+    for (let i = 0; i < docTypes.length; i += DT_BATCH) {
+      await Promise.all(docTypes.slice(i, i + DT_BATCH).map(runOne));
+      renderDocTypeList();
+    }
+
+    const counted = docTypes.filter((t) => t.docCount != null).length;
+    const failed = docTypes.filter((t) => t.countError).length;
+    dtCountBtn.textContent = failed
+      ? `Recount (${failed} failed)`
+      : "Recount records";
+    dtCountBtn.title = `${counted} of ${total} types counted`;
+
+    dtSortDir.disabled = counted === 0;
+    if (counted && !dtSortDirection) {
+      dtSortDirection = "desc";
+      dtSortDir.textContent = "↓";
+      dtSortDir.classList.add("active");
+      dtSortDir.title = "Most records first";
+    }
+    renderDocTypeList();
+  } finally {
+    dtCounting = false;
+    dtCountBtn.disabled = false;
+  }
+}
+
+dtTree.addEventListener("click", (e) => {
+  const header = e.target.closest(".dt-node-header");
+  if (!header) return;
+  const name = header.closest(".dt-node")?.dataset.name;
+  const type = docTypes.find((t) => t.name === name);
+  if (!type) return;
+
+  dtTree.querySelectorAll(".dt-node-header.selected").forEach((h) => h.classList.remove("selected"));
+  header.classList.add("selected");
+  dtSelected = type;
+  showDocTypeFields(type);
+});
+
+// ---- layout placement ------------------------------------------------------
+// The doc info panel is built from section + sectionPosition, so a property with
+// no section has no placement on the form. Prior work in this repo disagreed on
+// the spelling, so read both rather than betting on one.
+// Vault returns file_info__v at the top of the layout, but it is boilerplate
+// (file name, size, format) rather than classification data, so it reads better
+// last. Matches either a section heading or a field name.
+const DT_PIN_LAST = ["file_info__v"];
+
+function isPinnedLast(name) {
+  const n = String(name || "").toLowerCase();
+  return DT_PIN_LAST.some((p) => p.toLowerCase() === n);
+}
+
+function fieldSection(p) {
+  const s = p.section != null ? p.section : p.section__v;
+  return s == null || s === "" ? null : String(s);
+}
+
+function fieldSectionPos(p) {
+  const v =
+    p.sectionPosition != null
+      ? p.sectionPosition
+      : p.section_position != null
+      ? p.section_position
+      : p.order;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 9999;
+}
+
+// Returns { onLayout, off, detected }. When no property in the set carries a
+// section at all, placement isn't on this response — report everything rather
+// than an empty panel that reads as a failed load.
+function splitByLayout(props) {
+  if (!props.some((p) => fieldSection(p) !== null)) {
+    return { onLayout: props, off: [], detected: false };
+  }
+  const onLayout = [];
+  const off = [];
+  for (const p of props) {
+    const placed =
+      fieldSection(p) !== null && p.hidden !== true && p.disabled !== true;
+    (placed ? onLayout : off).push(p);
+  }
+  return { onLayout, off, detected: true };
+}
+
+function fieldRowHtml(p) {
+  let h = `<div class="dt-field-row" data-fname="${esc(p.name || "")}">`;
+  h += `<span class="dt-field-name" title="${esc(p.name || "")}">${esc(p.name || "")}</span>`;
+  h += `<span class="dt-field-label">${esc(p.label || "")}</span>`;
+  h += `<span class="dt-field-badges">`;
+  if (p.required === true) h += '<span class="dt-badge req">REQ</span>';
+  if (p.editable === false) h += '<span class="dt-badge locked">READ-ONLY</span>';
+  if (p.repeating === true) h += '<span class="dt-badge rep">MULTI</span>';
+  if (p.hidden === true) h += '<span class="dt-badge locked">HIDDEN</span>';
+  if (p.scope) h += `<span class="dt-badge scope">${esc(p.scope)}</span>`;
+  if (p.type) h += `<span class="dt-badge type-badge">${esc(p.type)}</span>`;
+  h += `</span></div>`;
+  return h;
+}
+
+function showDocTypeFields(type) {
+  dtBreadcrumb.innerHTML =
+    '<span class="dt-bc-item">Documents</span>' +
+    ' <span class="dt-bc-sep">&#8250;</span> ' +
+    `<span class="dt-bc-item">${esc(type.label)}</span>`;
+
+  if (type.error) {
+    dtStats.classList.add("hidden");
+    dtFields.innerHTML = `<div class="dm-empty">Couldn't load this type.<br />${esc(type.error)}</div>`;
     return;
   }
 
-  const result = await apiCall(endpoint);
-  if (!result.success) {
-    childrenEl.innerHTML = `<div class="dt-children-loading" style="color:var(--red);">Failed to load</div>`;
-    return;
-  }
+  const props = type.properties || [];
+  const { onLayout, off, detected } = splitByLayout(props);
+  type._layout = onLayout;
+  type._layoutDetected = detected;
 
-  const data = result.data;
-  // Extract children — API may nest them in various ways
-  let children = data[childKey] || [];
-  // Some responses have the children inside a wrapper
-  if (!children.length && data.types) children = data.types;
+  dtStats.classList.remove("hidden");
+  dtFieldCount.innerHTML = detected
+    ? `${onLayout.length} <small>on layout &middot; ${props.length} total</small>`
+    : `${props.length} <small>fields on this type</small>`;
 
-  if (children.length === 0) {
-    childrenEl.innerHTML = "";
-    node.querySelector(":scope > .dt-node-header .dt-node-arrow")?.classList.add("empty");
+  if (!props.length) {
+    dtFields.innerHTML = '<div class="dm-empty">This type declares no fields.</div>';
     return;
   }
 
   let html = "";
-  for (const c of children) {
-    const name = c.name || c.name__v || "";
-    const label = c.label || c.label__v || name;
-    const icon = childType === "subtype" ? "&#128194;" : "&#128203;";
-    const dataAttr = childType === "classification"
-      ? `data-classification="${esc(name)}" data-subtype="${esc(selection.subtype)}" data-type="${esc(selection.type)}"`
-      : `data-subtype="${esc(name)}" data-type="${esc(selection.type)}"`;
 
-    html += `<div class="dt-node" ${dataAttr}>`;
-    html += `<div class="dt-node-header" ${dataAttr}>`;
-    html += `<span class="dt-node-arrow${childType === "classification" ? " empty" : ""}">&#9654;</span>`;
-    html += `<span class="dt-node-icon">${icon}</span>`;
-    html += `<span class="dt-node-label">${esc(label)}</span>`;
-    html += `<span class="dt-node-sublabel">${esc(name)}</span>`;
-    html += `</div>`;
-    if (childType === "subtype") {
-      html += `<div class="dt-children"></div>`;
-    }
-    html += `</div>`;
-  }
-  childrenEl.innerHTML = html;
-}
-
-const dtStats = $("#dt-stats");
-const dtDocCount = $("#dt-doc-count");
-const dtLoadStatsBtn = $("#dt-load-stats-btn");
-const dtFillBar = $("#dt-fill-bar");
-
-let dtCurrentFields = []; // fields for the current selection
-
-async function displayDocTypeFields(selection) {
-  // Update breadcrumb
-  let bc = '<span class="dt-bc-item">Documents</span>';
-  if (selection.type) bc += ` <span class="dt-bc-sep">&#8250;</span> <span class="dt-bc-item">${esc(selection.type)}</span>`;
-  if (selection.subtype) bc += ` <span class="dt-bc-sep">&#8250;</span> <span class="dt-bc-item">${esc(selection.subtype)}</span>`;
-  if (selection.classification) bc += ` <span class="dt-bc-sep">&#8250;</span> <span class="dt-bc-item">${esc(selection.classification)}</span>`;
-  dtBreadcrumb.innerHTML = bc;
-
-  // Show stats bar, reset fill
-  dtStats.classList.remove("hidden");
-  dtDocCount.innerHTML = '<span class="spinner"></span>';
-  dtFillBar.classList.add("hidden");
-  dtFillBar.innerHTML = "";
-
-  // Fetch doc count async (don't await)
-  fetchDocCount(selection);
-
-  // Fetch the actual fields for this type from the API
-  dtFields.innerHTML = '<div class="dm-empty"><span class="spinner"></span> Loading fields...</div>';
-  dtCurrentFields = [];
-
-  // Build the deepest endpoint for this selection
-  let endpoint = `/metadata/objects/documents/types/${selection.type}`;
-  if (selection.subtype) endpoint += `/subtypes/${selection.subtype}`;
-  if (selection.classification) endpoint += `/classifications/${selection.classification}`;
-
-  const result = await apiCall(endpoint);
-
-  if (!result.success) {
-    dtFields.innerHTML = `<div class="dm-empty">Failed to load fields</div>`;
+  if (!detected) {
+    html +=
+      '<div class="dt-field-count">' +
+      `${props.length} fields &middot; no section data on this response, showing all` +
+      "</div>";
+    // No placement data, so payload order is the only sequence Vault gives —
+    // bar the pinned boilerplate, which still belongs at the end.
+    const order = new Map(props.map((p, i) => [p, i]));
+    const flat = [...props].sort(
+      (a, b) =>
+        (isPinnedLast(a.name) ? 1 : 0) - (isPinnedLast(b.name) ? 1 : 0) ||
+        order.get(a) - order.get(b)
+    );
+    for (const p of flat) html += fieldRowHtml(p);
+    dtFields.innerHTML = html;
     return;
   }
 
-  if (!docProperties || !docProperties.length) {
-    dtFields.innerHTML = '<div class="dm-empty">No field data loaded</div>';
-    dtCurrentFields = [];
-    return;
+  // Group into sections and reproduce the panel's own order: fields by
+  // sectionPosition within a section, sections by where they first appear.
+  const groups = new Map();
+  for (const p of onLayout) {
+    const s = fieldSection(p) || "General";
+    if (!groups.has(s)) groups.set(s, []);
+    groups.get(s).push(p);
   }
-
-  // Try to get type-specific properties from the API response
-  const data = result.data;
-  let typeProperties = null;
-
-  // At leaf level, the response may contain a properties array directly
-  // Check common nesting patterns
-  if (Array.isArray(data.properties)) typeProperties = data.properties;
-  for (const key of Object.keys(data)) {
-    if (typeProperties) break;
-    const val = data[key];
-    if (val && typeof val === "object" && !Array.isArray(val) && Array.isArray(val.properties)) {
-      typeProperties = val.properties;
-    }
+  // Fields read in true form order: sectionPosition within the section, then the
+  // order Vault returned. Required fields are badged, not reordered — moving them
+  // would break the sequence someone filling the form actually sees.
+  const payloadOrder = new Map(props.map((p, i) => [p, i]));
+  for (const list of groups.values()) {
+    list.sort(
+      (a, b) =>
+        (isPinnedLast(a.name) ? 1 : 0) - (isPinnedLast(b.name) ? 1 : 0) ||
+        fieldSectionPos(a) - fieldSectionPos(b) ||
+        payloadOrder.get(a) - payloadOrder.get(b)
+    );
   }
-
-  let fields;
-  if (typeProperties && typeProperties.length > 0) {
-    // We got type-specific properties — use them, filter hidden
-    fields = typeProperties.filter((f) => !f.hidden);
-  } else {
-    // Non-leaf level (has subtypes/classifications) — use global properties, filter hidden
-    fields = docProperties.filter((f) => !f.hidden);
+  // Order the sections themselves. sectionPosition may be numbered globally
+  // across the layout or restarted per section — Vault is not documented either
+  // way — so take each section's lowest position and fall back to the order it
+  // first appeared in the payload. Global numbering sorts correctly; per-section
+  // numbering ties on 1 and keeps payload order. Right under both readings.
+  const sectionFirstSeen = new Map();
+  for (const [name, list] of groups) {
+    sectionFirstSeen.set(name, Math.min(...list.map((p) => payloadOrder.get(p))));
   }
-
-  dtCurrentFields = fields;
-
-  if (fields.length === 0) {
-    dtFields.innerHTML = '<div class="dm-empty">No fields found. Try drilling into a subtype or classification.</div>';
-    return;
-  }
-
-  // Group by section
-  const sections = {};
-  for (const f of fields) {
-    const sec = f.section || f.section__v || "General";
-    if (!sections[sec]) sections[sec] = [];
-    sections[sec].push(f);
-  }
-
-  for (const sec of Object.keys(sections)) {
-    sections[sec].sort((a, b) => {
-      const pa = a.section_position || a.section_position__v || a.order || 999;
-      const pb = b.section_position || b.section_position__v || b.order || 999;
-      return pa - pb;
-    });
-  }
-
-  const sectionNames = Object.keys(sections).sort((a, b) => {
-    if (a === "General" || a === "generalProperties") return -1;
-    if (b === "General" || b === "generalProperties") return 1;
-    return a.localeCompare(b);
+  const sectionNames = [...groups.keys()].sort((a, b) => {
+    const pinned = (isPinnedLast(a) ? 1 : 0) - (isPinnedLast(b) ? 1 : 0);
+    if (pinned) return pinned;
+    const pa = Math.min(...groups.get(a).map(fieldSectionPos));
+    const pb = Math.min(...groups.get(b).map(fieldSectionPos));
+    return pa - pb || sectionFirstSeen.get(a) - sectionFirstSeen.get(b);
   });
 
-  let html = `<div class="dt-field-count">${fields.length} visible fields</div>`;
+  const requiredCount = onLayout.filter((p) => p.required === true).length;
+  html += `<div class="dt-field-count">${onLayout.length} on layout &middot; ${requiredCount} required &middot; ${sectionNames.length} section${sectionNames.length === 1 ? "" : "s"}</div>`;
 
-  for (const secName of sectionNames) {
-    html += `<div class="dt-section">`;
-    html += `<div class="dt-section-header">${esc(secName)}</div>`;
-    for (const f of sections[secName]) {
-      const name = f.name || f.name__v || "";
-      const label = f.label || f.label__v || "";
-      const type = f.type || f.type__v || "";
-      const required = f.required || f.required__v || false;
-      const editable = f.editable || f.editable__v || false;
-      const disabled = f.disabled || f.disabled__v || false;
+  for (const name of sectionNames) {
+    html += '<div class="dt-section">';
+    html += `<div class="dt-section-header">${esc(name)}</div>`;
+    for (const p of groups.get(name)) html += fieldRowHtml(p);
+    html += "</div>";
+  }
 
-      html += `<div class="dt-field-row" data-fname="${esc(name)}">`;
-      html += `<span class="dt-field-name" title="${esc(name)}">${esc(name)}</span>`;
-      html += `<span class="dt-field-label">${esc(label)}</span>`;
-      html += `<span class="dt-field-badges">`;
-      if (required) html += `<span class="dt-badge req">REQ</span>`;
-      if (editable && !disabled) html += `<span class="dt-badge edit">EDIT</span>`;
-      if (type) html += `<span class="dt-badge type-badge">${esc(type)}</span>`;
-      html += `</span>`;
-      html += `</div>`;
-    }
-    html += `</div>`;
+  if (off.length) {
+    const offSorted = [...off].sort((a, b) => payloadOrder.get(a) - payloadOrder.get(b));
+    html += '<div class="dt-offlayout" id="dt-offlayout">';
+    html += `<button type="button" class="dt-offlayout-toggle" aria-expanded="false">`;
+    html += `<span class="dt-offlayout-arrow">&#9654;</span> Not on layout (${off.length})`;
+    html += `</button>`;
+    html += '<div class="dt-offlayout-body">';
+    for (const p of offSorted) html += fieldRowHtml(p);
+    html += "</div></div>";
   }
 
   dtFields.innerHTML = html;
 }
 
-// Fetch document count for a selection
-async function fetchDocCount(selection) {
-  const where = buildWhereClause(selection);
-  const q = `SELECT COUNT(id) FROM documents${where}`;
-  const result = await apiCall("/query", "POST", `q=${encodeURIComponent(q)}`);
+dtFields.addEventListener("click", (e) => {
+  const btn = e.target.closest(".dt-offlayout-toggle");
+  if (!btn) return;
+  const wrap = btn.closest(".dt-offlayout");
+  const open = wrap.classList.toggle("open");
+  btn.setAttribute("aria-expanded", String(open));
+});
 
-  if (result.success && result.data?.responseStatus !== "FAILURE" && result.data?.data?.[0]) {
-    const count = result.data.data[0]["count(id)"] || result.data.data[0]["COUNT(id)"] || Object.values(result.data.data[0])[0] || 0;
-    dtDocCount.innerHTML = `${count} <small>documents</small>`;
+
+// ===================== AI PROVIDER KEY =====================
+// The key is written to and verified by background.js and never read back into
+// this page — popup.js only ever learns whether one exists and its last 4 chars.
+let aiProvider = "anthropic";
+
+const AI_PROVIDER_META = {
+  anthropic: {
+    label: "Anthropic",
+    prefix: "sk-ant-",
+  },
+  openai: {
+    label: "OpenAI",
+    prefix: "sk-proj-",
+  },
+  gemini: {
+    label: "Gemini",
+    prefix: "AIza",
+  },
+};
+
+const aiMeta = (id) => AI_PROVIDER_META[id] || AI_PROVIDER_META.anthropic;
+
+// The status block is always on screen, so every state has a title and a note.
+function setAiStatus(state, title, note) {
+  aiKeyStatus.className = `ai-status ${state}`;
+  aiStatusTitle.textContent = title;
+  aiStatusNote.textContent = note;
+}
+
+// Nothing saved is the starting point, not news — the none state renders as
+// empty space (see .ai-status.none).
+function setAiStatusNone() {
+  setAiStatus("none", "", "");
+}
+
+function setAiStatusOk(provider, model, hint) {
+  const tail = (hint || "").replace(/^…/, "");
+  setAiStatus(
+    "ok",
+    `Verified · ${aiMeta(provider).label}`,
+    `${model || "The model"} responded.${tail ? ` Key ends ${tail}.` : ""}`
+  );
+}
+
+function setAiStatusBad(detail) {
+  setAiStatus(
+    "bad",
+    "Rejected",
+    detail || `Enter a key beginning ${aiMeta(aiProvider).prefix} and try again.`
+  );
+}
+
+function paintAiProvider() {
+  for (const tile of aiProviderTiles.querySelectorAll(".ai-tile")) {
+    tile.classList.toggle("active", tile.dataset.provider === aiProvider);
+  }
+  aiKeyInput.placeholder = `${aiMeta(aiProvider).prefix}…`;
+}
+
+function setAiKeyMasked(masked) {
+  aiKeyInput.type = masked ? "password" : "text";
+  aiKeyReveal.textContent = masked ? "show" : "hide";
+}
+
+async function refreshAiKeyState() {
+  const state = await chrome.runtime.sendMessage({ action: "aiKeyState" });
+  if (!state?.success) return;
+  aiProvider = state.provider || "anthropic";
+  paintAiProvider();
+  aiKeyInput.value = "";
+  setAiKeyMasked(true);
+  aiKeyClear.disabled = !state.hasKey;
+
+  if (!state.hasKey) {
+    setAiStatusNone();
+    return;
+  }
+  if (state.verified === true) {
+    setAiStatusOk(state.provider, state.model, state.hint);
+    return;
+  }
+  if (state.verified === null) {
+    // Stored before verification was tracked — test it once rather than
+    // showing a state we cannot vouch for.
+    await runAiVerify();
+    return;
+  }
+  setAiStatusBad("This key has not passed a test request yet. Save & verify to check it.");
+}
+
+// Shared by "Save & verify" and the one-off migration check above.
+async function runAiVerify() {
+  setAiStatus("checking", "Verifying…", `Sending a one-token test request to ${aiMeta(aiProvider).label}.`);
+  const res = await chrome.runtime.sendMessage({ action: "aiVerifyKey" });
+  if (res?.success) {
+    setAiStatusOk(res.provider, res.model, res.hint);
   } else {
-    dtDocCount.textContent = "-- documents";
+    setAiStatusBad(res?.error);
+  }
+  refreshAskAvailability();
+  return !!res?.success;
+}
+
+aiProviderTiles.addEventListener("click", (e) => {
+  const tile = e.target.closest(".ai-tile");
+  if (!tile || tile.dataset.provider === aiProvider) return;
+  aiProvider = tile.dataset.provider;
+  paintAiProvider();
+  // A key belongs to one provider — switching invalidates what was verified.
+  setAiStatusNone();
+});
+
+aiKeyReveal.addEventListener("click", () => {
+  setAiKeyMasked(aiKeyInput.type !== "password");
+  aiKeyInput.focus();
+});
+
+// One action: store the key, then prove it works.
+aiKeySave.addEventListener("click", async () => {
+  const key = aiKeyInput.value.trim();
+  if (!key) {
+    setAiStatusBad(`Paste a key beginning ${aiMeta(aiProvider).prefix} first.`);
+    return;
+  }
+  aiKeySave.disabled = true;
+  setAiStatus("checking", "Verifying…", `Sending a one-token test request to ${aiMeta(aiProvider).label}.`);
+
+  const res = await chrome.runtime.sendMessage({
+    action: "aiSaveKey",
+    provider: aiProvider,
+    key: key,
+  });
+  if (!res?.success) {
+    aiKeySave.disabled = false;
+    setAiStatusBad(res?.error || "Could not save the key.");
+    return;
+  }
+  // Clear the field immediately — nothing needs it in the page after this.
+  aiKeyInput.value = "";
+  setAiKeyMasked(true);
+  aiKeyClear.disabled = false;
+  await runAiVerify();
+  aiKeySave.disabled = false;
+});
+
+aiKeyClear.addEventListener("click", async () => {
+  await chrome.runtime.sendMessage({ action: "aiSaveKey", provider: aiProvider, key: "" });
+  aiKeyInput.value = "";
+  setAiKeyMasked(true);
+  aiKeyClear.disabled = true;
+  setAiStatusNone();
+  refreshAskAvailability();
+});
+
+
+// ===================== ASK (VAULT DOCS) =====================
+const askNoKey = $("#ask-nokey");
+const askPanel = $("#ask-panel");
+const askPlatformBtn = $("#ask-platform");
+const askPlatformMenu = $("#ask-platform-menu");
+const askSourceBtn = $("#ask-source");
+const askSourceMenu = $("#ask-source-menu");
+const askLog = $("#ask-log");
+const askInput = $("#ask-input");
+const askSend = $("#ask-send");
+const askClear = $("#ask-clear");
+
+const ASK_PLATFORMS = [
+  { value: "platform", label: "Platform" },
+  { value: "clinical", label: "Clinical" },
+  { value: "commercial", label: "Commercial" },
+  { value: "quality", label: "Quality" },
+  { value: "qualityone", label: "QualityOne" },
+  { value: "medical", label: "Medical" },
+  { value: "regulatory", label: "Regulatory" },
+  { value: "safety", label: "Safety" },
+  { value: "vault_crm", label: "Vault CRM" },
+];
+
+const ASK_SOURCES = [
+  { value: "vault_api_reference", label: "API reference" },
+  { value: "vault_developer_documentation", label: "Developer docs" },
+  { value: "vault_help_documentation", label: "Vault Help" },
+  { value: "vault_java_sdk_javadocs", label: "Java SDK javadocs" },
+  { value: "vapil_javadocs", label: "VAPIL javadocs" },
+];
+
+const ASK_BLURB =
+  "Answers are grounded in Veeva's own documentation and cite the pages they used.";
+
+let askPlatform = "platform";
+let askSource = "vault_api_reference";
+let askTurns = [];
+let askBusy = false;
+// The newest question's node — what the log scrolls to and reserves room for.
+let askLastQuestion = null;
+
+const askLabel = (list, value) => (list.find((o) => o.value === value) || list[0]).label;
+
+// ---- Vault context ---------------------------------------------------------
+// The retrieval in background.js answers "what does Vault do"; this answers
+// "what is in THIS vault". It is retrieval too, not a dump: the loaded data
+// model runs to hundreds of objects and thousands of fields, so the question
+// picks what travels. Only configuration the session already loaded and the
+// query in the editor are ever sent — never a record, never a result row.
+const ASK_CTX_OBJECTS = 6;
+const ASK_CTX_FIELDS = 14;
+const ASK_CTX_TYPES = 10;
+const ASK_CTX_CHARS = 3200;
+
+// Ordinary English that would rank everything equally. Domain words like
+// "document" or "field" are deliberately NOT here — they are how a question
+// reaches the right part of the schema.
+const ASK_CTX_STOP = new Set([
+  "the", "and", "for", "with", "from", "that", "this", "what", "how", "does",
+  "can", "are", "you", "all", "get", "use", "using", "when", "which", "into",
+  "show", "write", "give", "there", "have", "has", "its", "any", "was", "were",
+]);
+
+// Whether the model's schema is worth sending at all when nothing matched
+// by name — a question about authentication has no use for object fields.
+const ASK_SCHEMA_HINT =
+  /\b(vql|select|from|where|query|queries|field|fields|object|objects|record|records|column|columns|picklist|relationship)\b/i;
+const ASK_TYPE_HINT = /\b(doc|docs|document|documents|type|types|binder|binders)\b/i;
+
+function askTokens(text) {
+  const found = String(text).toLowerCase().match(/[a-z_][a-z0-9_]{2,}/g) || [];
+  return [...new Set(found)].filter((t) => !ASK_CTX_STOP.has(t));
+}
+
+// Substring rather than whole-word: a question about "status" has to reach
+// status__v. Plurals are folded too — "products" must find product__v, which a
+// plain substring test misses because the haystack holds the singular.
+function askVariants(token) {
+  const out = [token];
+  if (token.endsWith("ies") && token.length > 4) out.push(`${token.slice(0, -3)}y`);
+  if (token.endsWith("es") && token.length > 3) out.push(token.slice(0, -2));
+  if (token.endsWith("s") && token.length > 3) out.push(token.slice(0, -1));
+  return out;
+}
+
+function askScore(tokens, ...fragments) {
+  const hay = fragments.filter(Boolean).join(" ").toLowerCase();
+  let score = 0;
+  for (const t of tokens) {
+    const hit = askVariants(t).find((v) => hay.includes(v));
+    if (hit) score += hit.length >= 5 ? 3 : 2;
+  }
+  return score;
+}
+
+function askRank(items, tokens, ...keys) {
+  return items
+    .map((item) => ({ item, score: askScore(tokens, ...keys.map((k) => item[k])) }))
+    .sort((a, b) => b.score - a.score);
+}
+
+// Returns { text, summary } — summary is what the answer's context chip shows.
+function buildVaultContext(question) {
+  const tokens = askTokens(question);
+  const parts = [];
+  const summary = [];
+
+  const objects = state.dataModel?.objects || [];
+  if (objects.length) {
+    const ranked = askRank(objects, tokens, "name", "label");
+    const picked = ranked.filter((r) => r.score > 0).slice(0, ASK_CTX_OBJECTS).map((r) => r.item);
+    // Most VQL is written against documents, so it rides along for a question
+    // that is about querying but named no object of its own.
+    const schemaQuestion = picked.length || ASK_SCHEMA_HINT.test(question);
+    if (schemaQuestion && !picked.some((o) => o.name === "documents")) {
+      const docs = objects.find((o) => o.name === "documents");
+      if (docs) picked.push(docs);
+    }
+    for (const o of picked) {
+      const fields = askRank(o.fields || [], tokens, "name", "label")
+        .slice(0, ASK_CTX_FIELDS)
+        .map((r) => r.item)
+        .filter((f) => f.name)
+        .map((f) => `${f.name} (${f.type}${f.required ? ", required" : ""})`);
+      if (!fields.length) continue;
+      parts.push(`OBJECT ${o.name}${o.label ? ` — ${o.label}` : ""}\n  ${fields.join("\n  ")}`);
+    }
+    if (picked.length) summary.push(`${picked.length} object${picked.length === 1 ? "" : "s"}`);
+  }
+
+  if (docTypes.length) {
+    const ranked = askRank(docTypes, tokens, "name", "label");
+    const matched = ranked.filter((r) => r.score > 0);
+    // Named types win; otherwise the list travels only for a question that is
+    // actually about document types.
+    const picked = (matched.length
+      ? matched
+      : ASK_TYPE_HINT.test(question)
+        ? ranked
+        : []
+    )
+      .slice(0, ASK_CTX_TYPES)
+      .map((r) => r.item);
+    if (picked.length) {
+      const lines = picked.map(
+        (t) =>
+          `${t.label} (${t.name})` + (t.docCount != null ? ` — ${t.docCount} documents` : "")
+      );
+      parts.push(`DOCUMENT TYPES\n  ${lines.join("\n  ")}`);
+      summary.push(`${picked.length} doc type${picked.length === 1 ? "" : "s"}`);
+    }
+  }
+
+  const vql = vqlInput.value.trim();
+  if (vql) {
+    parts.push(`QUERY CURRENTLY IN THE EDITOR\n  ${vql.slice(0, 400)}`);
+    summary.push("current query");
+  }
+
+  if (!parts.length) return { text: "", summary: "" };
+  let text = parts.join("\n\n");
+  if (text.length > ASK_CTX_CHARS) text = `${text.slice(0, ASK_CTX_CHARS)}\n…(truncated)`;
+  return { text, summary: summary.join(" · ") };
+}
+
+function paintAskScope() {
+  askPlatformBtn.querySelector(".ask-pill-text").textContent = askLabel(ASK_PLATFORMS, askPlatform);
+  askSourceBtn.querySelector(".ask-pill-text").textContent = askLabel(ASK_SOURCES, askSource);
+}
+
+function renderAskMenu(menuEl, options, current) {
+  menuEl.innerHTML = options
+    .map(
+      (o) =>
+        `<button class="ask-menu-item${o.value === current ? " active" : ""}" data-value="${esc(
+          o.value
+        )}">${esc(o.label)}</button>`
+    )
+    .join("");
+}
+
+function closeAskMenus(except) {
+  for (const [btn, menu] of [
+    [askPlatformBtn, askPlatformMenu],
+    [askSourceBtn, askSourceMenu],
+  ]) {
+    if (menu === except) continue;
+    menu.classList.add("hidden");
+    btn.setAttribute("aria-expanded", "false");
   }
 }
 
-function buildWhereClause(selection) {
-  const conditions = [];
-  if (selection.type) conditions.push(`type__v = '${selection.type}'`);
-  if (selection.subtype) conditions.push(`subtype__v = '${selection.subtype}'`);
-  if (selection.classification) conditions.push(`classification__v = '${selection.classification}'`);
-  return conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
+function toggleAskMenu(btn, menu, options, current) {
+  const willOpen = menu.classList.contains("hidden");
+  closeAskMenus(willOpen ? menu : null);
+  if (!willOpen) {
+    menu.classList.add("hidden");
+    btn.setAttribute("aria-expanded", "false");
+    return;
+  }
+  renderAskMenu(menu, options, current);
+  menu.classList.remove("hidden");
+  btn.setAttribute("aria-expanded", "true");
 }
 
-// Fill rate analysis
-dtLoadStatsBtn?.addEventListener("click", analyzeFillRate);
+askPlatformBtn.addEventListener("click", () =>
+  toggleAskMenu(askPlatformBtn, askPlatformMenu, ASK_PLATFORMS, askPlatform)
+);
+askSourceBtn.addEventListener("click", () =>
+  toggleAskMenu(askSourceBtn, askSourceMenu, ASK_SOURCES, askSource)
+);
 
-async function analyzeFillRate() {
-  if (!dtSelection || !dtCurrentFields.length || !state.sessionId) return;
+askPlatformMenu.addEventListener("click", (e) => {
+  const item = e.target.closest(".ask-menu-item");
+  if (!item) return;
+  askPlatform = item.dataset.value;
+  // Vault CRM content lives only in Vault Help.
+  if (askPlatform === "vault_crm") askSource = "vault_help_documentation";
+  closeAskMenus();
+  paintAskScope();
+});
 
-  dtLoadStatsBtn.disabled = true;
-  dtLoadStatsBtn.innerHTML = '<span class="spinner"></span> Analyzing...';
-  dtFillBar.classList.remove("hidden");
-  dtFillBar.innerHTML = '<div class="dt-children-loading"><span class="spinner"></span> Querying sample...</div>';
+askSourceMenu.addEventListener("click", (e) => {
+  const item = e.target.closest(".ask-menu-item");
+  if (!item) return;
+  askSource = item.dataset.value;
+  if (askSource.endsWith("javadocs")) askPlatform = "platform";
+  closeAskMenus();
+  paintAskScope();
+});
 
-  // Pick queryable fields (max 20 to avoid query limits)
-  const queryableFields = dtCurrentFields
-    .filter((f) => {
-      const name = f.name || f.name__v || "";
-      const queryable = f.queryable !== undefined ? f.queryable : true;
-      return queryable && name && !name.startsWith("__");
-    })
-    .slice(0, 20);
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".ask-pill-wrap")) closeAskMenus();
+});
 
-  const fieldNames = queryableFields.map((f) => f.name || f.name__v);
-  const where = buildWhereClause(dtSelection);
-  const q = `SELECT ${fieldNames.join(", ")} FROM documents${where} LIMIT 200`;
+// Model output is untrusted text: escape everything, then re-introduce only
+// inline code spans.
+function askInline(text) {
+  return esc(text).replace(/`([^`]+)`/g, "<code>$1</code>");
+}
 
-  const result = await apiCall("/query", "POST", `q=${encodeURIComponent(q)}`);
+function askCodeCard(lang, code) {
+  return (
+    '<div class="ask-code">' +
+    '<div class="ask-code-bar">' +
+    `<span class="ask-code-lang">${esc(lang || "code")}</span>` +
+    '<button class="ask-copy" type="button">copy</button>' +
+    "</div>" +
+    `<pre>${esc(code)}</pre>` +
+    "</div>"
+  );
+}
 
-  dtLoadStatsBtn.disabled = false;
-  dtLoadStatsBtn.innerHTML = "Analyze Fill Rate";
+// Fenced blocks become their own cards; everything else stays flowing text.
+function askFormat(text) {
+  const re = /```([A-Za-z0-9+#._-]*)\n?([\s\S]*?)```/g;
+  let html = "";
+  let last = 0;
+  let m;
+  while ((m = re.exec(text))) {
+    const before = text.slice(last, m.index);
+    if (before.trim()) html += `<div class="ask-text">${askInline(before.trim())}</div>`;
+    html += askCodeCard(m[1], m[2].replace(/\n+$/, ""));
+    last = re.lastIndex;
+  }
+  const rest = text.slice(last);
+  if (rest.trim() || !html) html += `<div class="ask-text">${askInline(rest.trim())}</div>`;
+  return html;
+}
 
-  if (!result.success || result.data?.responseStatus === "FAILURE" || !result.data?.data?.length) {
-    const err = result.data?.errors?.[0]?.message || "No data returned";
-    dtFillBar.innerHTML = `<div style="font-size:11px;color:var(--red);padding:4px 0;">${esc(err)}</div>`;
+function askEmptyState() {
+  return (
+    '<div class="ask-empty">' +
+    '<div class="ask-empty-title">Ask anything about the Vault API.</div>' +
+    `<div class="ask-empty-body">${esc(ASK_BLURB)}</div>` +
+    "</div>"
+  );
+}
+
+// Long answers are clamped to a readable opening and opened by the row beneath
+// them. That keeps the panel from growing without bound, which is what made the
+// overlay thrash the host page on every height report.
+const ASK_CLAMP_AT = 300;
+const ASK_CLAMP_TO = 240;
+const ASK_PIN_GAP = 10;
+const ASK_OPEN_LABEL = "show full answer \u25be";
+const ASK_CLOSE_LABEL = "collapse \u25b4";
+
+const reducedMotion = () =>
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function askSourcesHtml(sources, context) {
+  // The vault chip is not a citation — it tells the user which of their own
+  // configuration went to the provider with the question.
+  const ctxPill = context
+    ? `<span class="ask-source ask-context" title="Sent with your question: ${esc(
+        context
+      )}. Configuration only — no record data.">` +
+      `<span class="ask-source-n">&#9733;</span>` +
+      `<span class="ask-source-title">your vault · ${esc(context)}</span></span>`
+    : "";
+  const pills = (sources || [])
+    .map((sref) => ({ ...sref, url: safeUrl(sref.url) }))
+    .filter((sref) => sref.url)
+    .map(
+      (sref, i) =>
+        `<a class="ask-source" href="${esc(sref.url)}" target="_blank" rel="noopener noreferrer" title="${esc(
+          sref.title
+        )}"><span class="ask-source-n">${i + 1}</span><span class="ask-source-title">${esc(
+          sref.title
+        )}</span></a>`
+    )
+    .join("");
+  return pills || ctxPill ? `<div class="ask-sources">${ctxPill}${pills}</div>` : "";
+}
+
+function askTurnHtml(t) {
+  if (t.role === "user") {
+    return `<div class="ask-msg user"><div class="ask-msg-body">${esc(t.content)}</div></div>`;
+  }
+  const cls = t.error ? "error" : "assistant";
+  const body = t.pending
+    ? '<div class="ask-thinking"><div class="ask-dots"><span></span><span></span><span></span></div>' +
+      `<span class="ask-thinking-label">searching ${esc(askLabel(ASK_SOURCES, askSource))}</span></div>`
+    : `<div class="ask-answer">${askFormat(t.content)}</div>` +
+      (t.sources?.length || t.context ? askSourcesHtml(t.sources, t.context) : "");
+  return (
+    `<div class="ask-msg ${cls}"><div class="ask-msg-row">` +
+    `<span class="ask-avatar">V</span><div class="ask-msg-body">${body}</div>` +
+    "</div></div>"
+  );
+}
+
+// Turns are appended as nodes. Rebuilding the whole log on every reply meant
+// re-parsing every earlier answer — the cost the user felt as lag.
+function askAppendTurn(t) {
+  const holder = document.createElement("div");
+  holder.innerHTML = askTurnHtml(t);
+  const node = holder.firstElementChild;
+  const spacer = askLog.querySelector(".ask-spacer");
+  if (spacer) askLog.insertBefore(node, spacer);
+  else askLog.appendChild(node);
+  return node;
+}
+
+// Clamps an answer that runs past ASK_CLAMP_AT and gives it the opener row.
+function askClamp(node) {
+  const answer = node?.querySelector(".ask-answer");
+  if (!answer || answer.dataset.clamped) return;
+  if (answer.scrollHeight <= ASK_CLAMP_AT) return;
+  answer.dataset.clamped = "1";
+  answer.classList.add("collapsed");
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "ask-expand";
+  row.textContent = ASK_OPEN_LABEL;
+  answer.after(row);
+}
+
+function askToggleAnswer(row) {
+  const answer = row.previousElementSibling;
+  if (!answer?.classList.contains("ask-answer")) return;
+  const opening = answer.classList.contains("collapsed");
+  const start = answer.getBoundingClientRect().height;
+
+  answer.classList.toggle("collapsed", !opening);
+  row.textContent = opening ? ASK_CLOSE_LABEL : ASK_OPEN_LABEL;
+
+  if (reducedMotion()) {
+    answer.style.maxHeight = opening ? "none" : "";
+    askAfterToggle(row, opening);
     return;
   }
 
-  const rows = result.data.data;
-  const totalRows = rows.length;
+  // Animated between measured heights rather than to a max-height the content
+  // never reaches, so the easing matches the distance actually travelled.
+  answer.style.maxHeight = "none";
+  const end = opening ? answer.scrollHeight : ASK_CLAMP_TO;
+  answer.style.maxHeight = `${start}px`;
+  void answer.offsetHeight;
+  answer.style.transition = "max-height .3s cubic-bezier(.4,0,.2,1)";
+  answer.style.maxHeight = `${end}px`;
 
-  // Calculate fill rate per field
-  const fillRates = {};
-  let totalFilled = 0;
-  let totalCells = 0;
+  // Hands height back to the stylesheet once the glide is over. The timer is a
+  // fallback: a transitionend that never arrives would pin the answer at a
+  // pixel height forever.
+  const settle = () => {
+    answer.removeEventListener("transitionend", onEnd);
+    answer.style.transition = "";
+    answer.style.maxHeight = opening ? "none" : "";
+  };
+  const onEnd = (e) => {
+    if (e.propertyName === "max-height") settle();
+  };
+  answer.addEventListener("transitionend", onEnd);
+  setTimeout(settle, 400);
 
-  for (const fname of fieldNames) {
-    let filled = 0;
-    for (const row of rows) {
-      const val = row[fname];
-      if (val !== null && val !== undefined && val !== "") filled++;
-    }
-    fillRates[fname] = Math.round((filled / totalRows) * 100);
-    totalFilled += filled;
-    totalCells += totalRows;
-  }
-
-  const overallPct = totalCells > 0 ? Math.round((totalFilled / totalCells) * 100) : 0;
-
-  // Sort by fill rate ascending (emptiest first)
-  const sorted = fieldNames.slice().sort((a, b) => fillRates[a] - fillRates[b]);
-
-  // Render
-  let html = `<div class="dt-fill-summary">`;
-  html += `Overall fill rate: <span class="dt-fill-pct">${overallPct}%</span>`;
-  html += ` <small>(sample of ${totalRows} docs, ${fieldNames.length} fields)</small>`;
-  html += `</div>`;
-
-  html += `<div class="dt-fill-track"><div class="dt-fill-track-inner" style="width:${overallPct}%;background:${fillColor(overallPct)};"></div></div>`;
-
-  html += `<div class="dt-fill-detail">`;
-  for (const fname of sorted) {
-    const pct = fillRates[fname];
-    html += `<div class="dt-fill-field">`;
-    html += `<span class="dt-fill-field-name" title="${esc(fname)}">${esc(fname)}</span>`;
-    html += `<span class="dt-fill-field-bar"><span class="dt-fill-field-bar-inner" style="width:${pct}%;background:${fillColor(pct)};"></span></span>`;
-    html += `<span class="dt-fill-field-pct">${pct}%</span>`;
-    html += `</div>`;
-  }
-  html += `</div>`;
-
-  dtFillBar.innerHTML = html;
+  askAfterToggle(row, opening);
 }
 
-function fillColor(pct) {
-  if (pct >= 80) return "var(--green)";
-  if (pct >= 50) return "var(--orange)";
-  return "var(--red)";
+// Closing an answer leaves a hole below it; reopening changes how much room the
+// newest question needs. Both want the reserve recomputed.
+function askAfterToggle(row, opened) {
+  askReserveRoom();
+  if (opened) return;
+  const msg = row.closest(".ask-msg");
+  if (msg === askLastQuestion?.nextElementSibling) askPinQuestion("smooth");
+  else if (msg) askLog.scrollTo({
+    top: Math.max(0, askOffsetOf(msg) - ASK_PIN_GAP),
+    behavior: reducedMotion() ? "auto" : "smooth",
+  });
 }
+
+// How much room the overlay has on the host page. content.js sends it, because
+// this window's own viewport is just the height we last reported.
+let askSpace = 0;
+
+window.addEventListener("message", (e) => {
+  if (e.source !== window.parent) return;
+  // Only the host page this overlay is embedded in, or ourselves in full-window
+  // mode. Anything else running on that page can post here too.
+  let fromHost = false;
+  try {
+    fromHost = e.origin === location.origin || isVaultHost(new URL(e.origin).hostname);
+  } catch (err) {
+    fromHost = false;
+  }
+  if (!fromHost) return;
+  if (e.data?.type !== "vault-dweller-space") return;
+  const h = Number(e.data.height);
+  if (!Number.isFinite(h) || h <= 0) return;
+  askSpace = h;
+  fitAskLog();
+});
+
+// Gives the conversation a fixed height filling the room the overlay has.
+// Fixed, not max — a height that grows with the content resizes the panel the
+// moment a question is asked, which moves the whole layout under the user.
+// Everything above and below the log stays put; only the log scrolls.
+function fitAskLog() {
+  if (WINDOW_MODE || !askSpace) return;
+  const logH = askLog.getBoundingClientRect().height;
+  if (!logH) return; // Ask tab not on screen; nothing to measure against.
+  const shellH = document.querySelector(".shell").getBoundingClientRect().height;
+  const chrome = shellH - logH;
+  // The floor is deliberately low: on a short browser window a cramped
+  // conversation beats a panel whose composer is off screen.
+  const h = Math.max(120, Math.min(560, askSpace - chrome - 10));
+  document.documentElement.style.setProperty("--ask-log-h", `${h}px`);
+}
+
+// Distance from the top of the log's scrollable content to a turn.
+function askOffsetOf(node) {
+  return (
+    node.getBoundingClientRect().top -
+    askLog.getBoundingClientRect().top +
+    askLog.scrollTop
+  );
+}
+
+function askSpacerEl() {
+  let el = askLog.querySelector(".ask-spacer");
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "ask-spacer";
+  }
+  if (el !== askLog.lastElementChild) askLog.appendChild(el);
+  return el;
+}
+
+// Reserves room under the newest exchange so its question can actually reach
+// the top of the log. Without it the scroll runs out partway and the question
+// stops wherever it happened to land.
+// Run twice: the first pass can push the log itself to its max height, which
+// changes the room available to the second.
+function askReserveRoom() {
+  const q = askLastQuestion;
+  if (!q || !askLog.contains(q)) return;
+  const spacer = askSpacerEl();
+  for (let pass = 0; pass < 2; pass++) {
+    spacer.style.height = "0px";
+    const below = askLog.scrollHeight - askOffsetOf(q);
+    spacer.style.height = `${Math.max(0, askLog.clientHeight - below - ASK_PIN_GAP)}px`;
+  }
+}
+
+// Puts the question the user just asked at the top of the log. Instant by
+// default: an animated scroll here races the answer landing and the composer
+// taking focus, and losing that race is what put the view at the bottom.
+function askPinQuestion(behavior) {
+  const q = askLastQuestion;
+  if (!q || !askLog.contains(q)) return;
+  fitAskLog();
+  askReserveRoom();
+  askLog.scrollTo({
+    top: Math.max(0, askOffsetOf(q) - ASK_PIN_GAP),
+    behavior: reducedMotion() ? "auto" : behavior || "auto",
+  });
+}
+
+// Full rebuild — only for the empty state and "new conversation".
+function renderAskLog() {
+  askLog.innerHTML = "";
+  if (!askTurns.length) {
+    askLog.innerHTML = askEmptyState();
+    return;
+  }
+  let lastUser = null;
+  for (const t of askTurns) {
+    const node = askAppendTurn(t);
+    if (t.role === "user") lastUser = node;
+    else askClamp(node);
+  }
+  askLastQuestion = lastUser;
+  askPinQuestion("auto");
+}
+
+// Measured while the tab is still hidden, scrollHeight reads 0 — the floor
+// keeps the field one line tall until it has real content to size to.
+function autoGrowAskInput() {
+  askInput.style.height = "auto";
+  askInput.style.height = `${Math.min(Math.max(askInput.scrollHeight, 26), 120)}px`;
+  // A taller composer shortens the conversation rather than the panel.
+  fitAskLog();
+}
+
+// Only a verified key unlocks Ask — a stored-but-rejected key would just fail
+// on the first question.
+async function refreshAskAvailability() {
+  const state = await chrome.runtime.sendMessage({ action: "aiKeyState" });
+  const ready = !!state?.hasKey && state.verified !== false;
+  if (state?.provider) aiProvider = state.provider;
+  askPanel.classList.toggle("hidden", !ready);
+  askNoKey.classList.toggle("hidden", ready);
+  if (ready && !askLog.innerHTML) renderAskLog();
+  if (ready) fitAskLog();
+}
+
+async function sendAsk(text) {
+  const question = (text ?? askInput.value).trim();
+  if (!question || askBusy) return;
+
+  askBusy = true;
+  askSend.disabled = true;
+  askInput.value = "";
+  autoGrowAskInput();
+
+  if (!askTurns.length) askLog.innerHTML = "";
+  const userTurn = { role: "user", content: question };
+  askTurns.push(userTurn);
+  const userNode = askAppendTurn(userTurn);
+  const pendingNode = askAppendTurn({ role: "assistant", content: "", pending: true });
+  askLastQuestion = userNode;
+  askPinQuestion();
+
+  const ctx = buildVaultContext(question);
+  const res = await chrome.runtime.sendMessage({
+    action: "aiChat",
+    platform: askPlatform,
+    source: askSource,
+    vaultContext: ctx.text,
+    // Failed turns are not replayed; the pending placeholder is DOM-only.
+    messages: askTurns
+      .filter((t) => !t.error)
+      .map((t) => ({ role: t.role, content: t.content })),
+  });
+
+  const answer = res?.success
+    ? {
+        role: "assistant",
+        content: res.answer,
+        provider: res.provider,
+        sources: res.sources,
+        context: ctx.summary,
+      }
+    : { role: "assistant", content: res?.error || "Request failed.", error: true };
+  askTurns.push(answer);
+
+  pendingNode.remove();
+  const answerNode = askAppendTurn(answer);
+  askClamp(answerNode);
+  // The answer replaced a short placeholder, so the room below changed — pin
+  // again to hold the question at the top.
+  askPinQuestion();
+
+  askBusy = false;
+  askSend.disabled = false;
+  // preventScroll matters: the composer sits below the log, so a plain focus()
+  // scrolls the page down to reveal it and undoes the pin.
+  askInput.focus({ preventScroll: true });
+}
+
+askSend.addEventListener("click", () => sendAsk());
+
+askInput.addEventListener("input", autoGrowAskInput);
+
+askInput.addEventListener("keydown", (e) => {
+  // Enter sends; Shift+Enter is a newline, as in any chat composer.
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendAsk();
+  }
+});
+
+askLog.addEventListener("click", async (e) => {
+  const expander = e.target.closest(".ask-expand");
+  if (expander) {
+    askToggleAnswer(expander);
+    return;
+  }
+  const copy = e.target.closest(".ask-copy");
+  if (!copy) return;
+  const pre = copy.closest(".ask-code")?.querySelector("pre");
+  if (!pre) return;
+  await navigator.clipboard.writeText(pre.textContent);
+  copy.textContent = "copied";
+  copy.classList.add("copied");
+  setTimeout(() => {
+    copy.textContent = "copy";
+    copy.classList.remove("copied");
+  }, 1200);
+});
+
+askClear.addEventListener("click", () => {
+  askTurns = [];
+  askLastQuestion = null;
+  renderAskLog();
+  askInput.focus({ preventScroll: true });
+});
+
+paintAskScope();
+autoGrowAskInput();
 
 // ===================== API HELPER =====================
 async function apiCall(endpoint, method = "GET", body = null) {
@@ -2728,8 +3716,33 @@ onDataModelLoaded = function (timeStr) {
 };
 
 // ===================== UTILS =====================
+// Escapes for both text and quoted-attribute contexts. The textContent round
+// trip this used to do leaves " and ' untouched, so any value interpolated
+// into title="…" or data-x="…" could close the attribute and add its own —
+// a document named `" onmouseover="…` was enough to run script in here.
+const ESC_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+
 function esc(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
+  return String(str == null ? "" : str).replace(/[&<>"']/g, (ch) => ESC_MAP[ch]);
+}
+
+// Only ever emit links we can vouch for. Source URLs arrive from the
+// documentation server, and `javascript:` in an href runs in this page, which
+// holds the Vault session.
+function safeUrl(url) {
+  try {
+    const parsed = new URL(String(url), location.href);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : "";
+  } catch (e) {
+    return "";
+  }
+}
+
+// Vault tenants are subdomains of veevavault.com and nothing else. A substring
+// test passes "veevavault.com.attacker.example", which would send the session
+// token and every query to that host.
+const VAULT_HOST_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.veevavault\.com$/i;
+
+function isVaultHost(host) {
+  return VAULT_HOST_RE.test(String(host || ""));
 }

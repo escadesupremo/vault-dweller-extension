@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Vault Dweller",
   "version": "1.0.0",
-  "description": "Vault Dweller — Query, explore, and edit your Veeva Vault data model with VQL.",
+  "description": "Query, explore and edit your Veeva Vault data model with VQL. Not affiliated with Veeva Systems Inc.",
   "permissions": [
     "cookies",
     "activeTab",
@@ -10,7 +10,11 @@
     "scripting"
   ],
   "host_permissions": [
-    "https://*.veevavault.com/*"
+    "https://*.veevavault.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.openai.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://docs.veevavault.dev/*"
   ],
   "action": {
     "default_icon": {
@@ -29,15 +33,27 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*.veevavault.com/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://*.veevavault.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["popup.html", "popup.css", "popup.js", "icons/*"],
-      "matches": ["https://*.veevavault.com/*"]
+      "resources": [
+        "popup.html",
+        "icons/*"
+      ],
+      "matches": [
+        "https://*.veevavault.com/*"
+      ]
     }
-  ]
+  ],
+  "author": {
+    "email": "kristof.domokos.szabo@gmail.com"
+  }
 }
