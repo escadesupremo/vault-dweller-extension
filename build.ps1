@@ -1,8 +1,8 @@
 # Builds the Chrome Web Store package.
 #
-# Ships an explicit allow-list, never the folder: this repo also holds android/,
-# ios/, web/ and .git/, none of which belong in the extension and all of which
-# would be published if the whole directory were zipped.
+# Ships an explicit allow-list, never the folder: the repo also holds .git/, the
+# build output, and the privacy page that GitHub Pages serves, none of which
+# belong inside the extension package.
 #
 # Entries are written by hand with forward slashes. Both Compress-Archive and
 # ZipFile::CreateFromDirectory on Windows PowerShell write subdirectory paths
@@ -102,7 +102,7 @@ try {
     if ($backslashed) {
         throw "entries use backslashes: $($backslashed -join ', ')"
     }
-    $stowaways = $entries | Where-Object { $_ -match '^(\.git|android|ios|web|dist)/' }
+    $stowaways = $entries | Where-Object { $_ -match '^(\.git|dist)/' -or $_ -match '\.(md|ps1)$' -or $_ -eq 'privacy.html' }
     if ($stowaways) {
         throw "package contains excluded paths: $($stowaways -join ', ')"
     }
