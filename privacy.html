@@ -3,359 +3,610 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Privacy Policy — Vault Dweller</title>
-<meta name="description" content="Privacy policy for the Vault Dweller Chrome extension. No data is sent to the developer; the extension has no backend server." />
+<title>Vault Dweller — Privacy Policy</title>
+<meta name="description" content="Privacy policy for the Vault Dweller Chrome extension. No backend, no telemetry, no tracking: nothing is sent to the developer." />
 <meta name="robots" content="index, follow" />
 <style>
   /* Self-contained on purpose: this page makes no request to any third party,
-     which is the same claim it makes on behalf of the extension. No web fonts,
-     no analytics, no embeds. */
+     which is the same claim it makes on behalf of the extension. System faces
+     only — no web fonts, no analytics, no embeds. */
   :root {
-    --bg: #eae7dd;
-    --surface: #fdfcf8;
-    --paper: #f4f1e6;
-    --ink: #16150f;
-    --text: #16150f;
-    --text-sec: #4a4636;
-    --text-faint: #6d6957;
-    --accent: #c08a2e;
-    --accent-deep: #7a5510;
-    --accent-light: #fbf3e1;
-    --border: #dad6c6;
-    --radius: 8px;
-    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --bg: #f5f2e9;
+    --ink: #17160f;
+    --ink-2: #211f17;
+    --ink-line: #38341f;
+    --card: #fdfcf8;
+    --well: #ece7d8;
+    --line: #dcd7c6;
+    --text: #2a281f;
+    --text-2: #4a4636;
+    --text-3: #6b6654;
+    --on-dark: #f5f2e9;
+    --on-dark-2: #c9c4b0;
+    --on-dark-3: #a8a390;
+    --on-dark-line: #5a5644;
+    --gold: #8a5d0f;        /* on light */
+    --gold-hi: #c08a2e;     /* on dark */
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+    --mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --pad: clamp(20px, 6vw, 80px);
   }
 
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #17160f;
-      --surface: #1f1d15;
-      --paper: #252318;
-      --ink: #f4f1e6;
-      --text: #ece8da;
-      --text-sec: #bdb8a4;
-      --text-faint: #97927f;
-      --accent: #d9a751;
-      --accent-deep: #e6bd76;
-      --accent-light: #2b2517;
-      --border: #38341f;
-    }
-  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
 
-  * { box-sizing: border-box; }
-
-  html { -webkit-text-size-adjust: 100%; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
 
   body {
-    margin: 0;
-    padding: 0 16px 72px;
     background: var(--bg);
     color: var(--text);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    font-size: 16px;
-    line-height: 1.65;
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.7;
     -webkit-font-smoothing: antialiased;
   }
 
-  .wrap { max-width: 720px; margin: 0 auto; }
+  .wrap { max-width: 1280px; margin: 0 auto; }
 
-  header {
-    margin: 0 -16px 32px;
-    padding: 36px 16px 28px;
-    background: var(--ink);
-    color: var(--paper);
-  }
-
-  header .wrap { max-width: 720px; }
-
-  h1 {
-    margin: 0 0 6px;
-    font-size: 1.85rem;
-    line-height: 1.15;
-    letter-spacing: -0.01em;
-  }
-
-  .sub {
-    margin: 0;
-    color: rgba(244, 241, 230, 0.68);
-    font-size: 0.95rem;
-  }
-
-  .meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 18px;
-    margin-top: 18px;
-    font-family: var(--mono);
-    font-size: 0.72rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: rgba(244, 241, 230, 0.55);
-  }
-
-  h2 {
-    margin: 44px 0 12px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border);
-    font-size: 1.2rem;
-    line-height: 1.3;
-  }
-
-  h3 { margin: 28px 0 8px; font-size: 1rem; }
-
-  p { margin: 0 0 14px; }
-
-  a { color: var(--accent-deep); text-underline-offset: 2px; }
-  a:hover { color: var(--accent); }
-
-  strong { font-weight: 650; }
-
-  ul { margin: 0 0 14px; padding-left: 22px; }
-  li { margin-bottom: 8px; }
-
-  .lede {
-    padding: 18px 20px;
-    background: var(--accent-light);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
-    border-radius: var(--radius);
-    font-size: 1.02rem;
-  }
-
-  .lede p:last-child { margin-bottom: 0; }
-
-  .card {
-    padding: 4px 20px 6px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-  }
-
-  table {
-    width: 100%;
-    margin: 0 0 16px;
-    border-collapse: collapse;
-    font-size: 0.95rem;
-  }
-
-  caption {
-    padding-bottom: 10px;
-    color: var(--text-faint);
-    font-size: 0.88rem;
-    text-align: left;
-  }
-
-  th, td {
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--border);
-    text-align: left;
-    vertical-align: top;
-  }
-
-  thead th {
-    background: var(--paper);
-    font-family: var(--mono);
-    font-size: 0.7rem;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--text-faint);
-  }
-
-  tbody tr:last-child td { border-bottom: 0; }
+  a { color: var(--gold); text-underline-offset: 3px; }
+  a:hover { color: #5e3f08; }
 
   code {
-    padding: 1px 5px;
-    background: var(--paper);
-    border: 1px solid var(--border);
-    border-radius: 4px;
     font-family: var(--mono);
-    font-size: 0.85em;
+    font-size: .86em;
+    padding: 1px 6px;
+    background: var(--well);
+    border-radius: 4px;
   }
 
-  .never {
-    margin: 22px 0;
-    padding: 16px 20px;
-    background: var(--surface);
-    border: 1px solid var(--accent);
-    border-radius: var(--radius);
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--text-3);
   }
 
-  .never p { margin: 0; }
+  .num { font-family: var(--mono); font-size: 13px; color: var(--gold); }
 
-  footer {
-    margin-top: 52px;
-    padding-top: 22px;
-    border-top: 1px solid var(--border);
-    color: var(--text-faint);
-    font-size: 0.85rem;
+  h1, h2, .display {
+    font-family: var(--serif);
+    font-weight: 500;
+    letter-spacing: -.015em;
   }
 
-  @media (max-width: 560px) {
-    body { font-size: 15.5px; }
-    h1 { font-size: 1.55rem; }
-    table, thead, tbody, th, td, tr { display: block; }
-    thead { display: none; }
-    tbody tr {
-      margin-bottom: 12px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid var(--border);
-    }
-    td { border: 0; padding: 4px 0; }
-    td::before {
-      display: block;
-      font-family: var(--mono);
-      font-size: 0.68rem;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--text-faint);
-      content: attr(data-label);
-    }
+  /* ---------------------------------------------------------------- top bar */
+  .topbar { background: var(--ink); border-bottom: 1px solid var(--ink-line); }
+
+  .topbar .wrap {
+    min-height: 72px;
+    padding: 14px var(--pad);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px 24px;
+  }
+
+  .brand { display: flex; align-items: center; gap: 12px; }
+
+  .brand span {
+    font-family: var(--serif);
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--on-dark);
+    letter-spacing: -.01em;
+  }
+
+  .topmeta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 28px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--on-dark-3);
+  }
+
+  /* ---------------------------------------------------------------- hero */
+  .hero { background: var(--ink); color: var(--on-dark); }
+
+  .hero .wrap {
+    padding: clamp(48px, 8vw, 88px) var(--pad) clamp(56px, 9vw, 96px);
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: clamp(36px, 6vw, 72px);
+    align-items: center;
+  }
+
+  .hero-kicker {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--gold-hi);
+  }
+
+  .hero h1 {
+    margin: 26px 0 22px;
+    font-size: clamp(34px, 5.2vw, 64px);
+    line-height: 1.04;
+  }
+
+  .hero p { font-size: clamp(16px, 1.6vw, 19px); line-height: 1.6; color: var(--on-dark-2); max-width: 520px; }
+
+  /* Where data can go */
+  .flow {
+    background: var(--ink-2);
+    border: 1px solid var(--ink-line);
+    border-radius: 16px;
+    padding: 28px;
+  }
+
+  .flow-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    padding-bottom: 18px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--ink-line);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--on-dark-3);
+  }
+
+  .flow-head .from { letter-spacing: 0; text-transform: none; }
+
+  .flow-row {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    gap: 16px;
+    align-items: start;
+    padding: 14px 0;
+    border-bottom: 1px dashed var(--ink-line);
+  }
+
+  .flow-row:last-child { border-bottom: 0; padding-bottom: 4px; }
+
+  .flow-row svg { margin-top: 2px; }
+  .flow-row .what { display: flex; flex-direction: column; gap: 3px; }
+  .flow-row .what b { font-size: 16px; font-weight: 600; }
+  .flow-row .what span { font-size: 14px; color: var(--on-dark-3); line-height: 1.5; }
+
+  .pill {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+
+  .pill.always { background: var(--on-dark); color: var(--ink); }
+  .pill.optin { border: 1px solid var(--gold-hi); color: var(--gold-hi); }
+  .pill.never { border: 1px solid var(--on-dark-line); color: var(--on-dark-3); }
+
+  .struck { color: var(--on-dark-3); text-decoration: line-through; text-decoration-color: #7d7866; }
+
+  /* ---------------------------------------------------------------- short version */
+  .short { padding: clamp(44px, 7vw, 72px) var(--pad) clamp(48px, 8vw, 80px); border-bottom: 1px solid var(--line); }
+
+  .short-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px 24px;
+    margin-bottom: 32px;
+  }
+
+  .short-head h2 { font-size: clamp(24px, 3vw, 32px); }
+
+  .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .card .lead { font-size: 17px; font-weight: 600; line-height: 1.35; }
+  .card .sub { font-size: 15px; line-height: 1.55; color: var(--text-2); }
+
+  .card.dark { background: var(--ink); border-color: var(--ink); color: var(--on-dark); }
+  .card.dark .num { color: var(--gold-hi); }
+  .card.dark .sub { color: var(--on-dark-2); }
+
+  /* ---------------------------------------------------------------- body */
+  .body { padding: clamp(48px, 7vw, 80px) var(--pad) 0; display: grid; grid-template-columns: 220px minmax(0, 760px); gap: clamp(40px, 8vw, 100px); }
+
+  .rail { display: flex; flex-direction: column; gap: 4px; align-self: start; position: sticky; top: 24px; }
+  .rail .eyebrow { margin-bottom: 12px; }
+
+  .rail a {
+    display: flex;
+    gap: 12px;
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 15px;
+  }
+
+  .rail a:last-child { border-bottom: 1px solid var(--line); }
+  .rail a:hover { color: var(--gold); }
+
+  .sections { display: flex; flex-direction: column; gap: clamp(56px, 8vw, 96px); }
+
+  section { display: flex; flex-direction: column; gap: 20px; }
+
+  .sec-head { display: flex; flex-direction: column; gap: 8px; }
+  .sec-head h2 { font-size: clamp(25px, 3.2vw, 34px); line-height: 1.15; }
+
+  /* stored table */
+  .table { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+
+  .table .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: 24px;
+    padding: 16px 24px;
+    border-top: 1px solid var(--line);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  .table .row.head {
+    border-top: 0;
+    padding: 12px 24px;
+    background: var(--well);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: #5a5644;
+  }
+
+  .table .row b { font-weight: 600; }
+  .table .row .why { color: var(--text-2); }
+
+  .trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+
+  .chip-card {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .chip-card b { font-family: var(--mono); font-size: 14px; font-weight: 600; }
+  .chip-card span { font-size: 14px; line-height: 1.45; color: var(--text-2); }
+
+  .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; font-size: 15px; line-height: 1.45; }
+
+  .fact { display: flex; gap: 10px; align-items: flex-start; padding: 16px; background: var(--well); border-radius: 10px; }
+  .fact svg { flex-shrink: 0; margin-top: 2px; }
+
+  /* AI disclosure */
+  .disclose { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+  .disclose ul { list-style: none; display: flex; flex-direction: column; gap: 10px; font-size: 15px; line-height: 1.5; }
+  .disclose li { display: flex; gap: 10px; }
+  .disclose li::before { content: "→"; color: var(--gold); font-family: var(--mono); flex-shrink: 0; }
+
+  .callout {
+    background: var(--ink);
+    color: var(--on-dark);
+    border-radius: 14px;
+    padding: clamp(22px, 3.5vw, 32px);
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+
+  .callout .display { font-size: clamp(20px, 2.4vw, 26px); line-height: 1.25; }
+  .callout p + p { margin-top: 8px; font-size: 16px; line-height: 1.6; color: var(--on-dark-2); }
+
+  .links { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; font-size: 15px; color: var(--text-2); }
+
+  /* what we do not do */
+  .nots { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+  .nots div { display: grid; grid-template-columns: 40px minmax(0, 1fr); padding: 18px 0; border-bottom: 1px solid var(--line); }
+  .nots span:first-child { font-family: var(--mono); color: var(--gold); }
+
+  #other { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; padding-top: 40px; border-top: 1px solid var(--ink); }
+  #other h3 { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--text-3); margin-bottom: 10px; }
+  #other p { font-size: 15px; line-height: 1.6; }
+
+  /* ---------------------------------------------------------------- footer */
+  footer { margin-top: clamp(56px, 9vw, 96px); }
+
+  footer .wrap {
+    padding: 32px var(--pad) 40px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 16px 48px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-3);
+  }
+
+  footer p { max-width: 720px; }
+  footer .nothing { font-family: var(--mono); font-size: 12px; }
+
+  /* ---------------------------------------------------------------- narrow */
+  @media (max-width: 1000px) {
+    .hero .wrap { grid-template-columns: minmax(0, 1fr); }
+    .body { grid-template-columns: minmax(0, 1fr); }
+    .rail { position: static; }
+    .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  @media (max-width: 680px) {
+    body { font-size: 16px; }
+    .cards, .trio, .facts, #other { grid-template-columns: minmax(0, 1fr); }
+    .table .row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    .table .row.head { display: none; }
+    .flow-row { grid-template-columns: 20px minmax(0, 1fr); }
+    .flow-row .pill { grid-column: 2; justify-self: start; }
+    .callout { grid-template-columns: minmax(0, 1fr); }
+    .callout svg { display: none; }
   }
 
   @media print {
-    body { background: #fff; color: #000; padding: 0; }
-    header { background: none; color: #000; margin: 0 0 24px; padding: 0; }
-    .sub, .meta { color: #444; }
-    .lede, .card, .never { border: 1px solid #999; }
+    body { background: #fff; }
+    .topbar, .hero, .card.dark, .callout { background: #fff !important; color: #000 !important; }
+    .hero p, .callout p + p { color: #333 !important; }
+    .rail { display: none; }
   }
 </style>
 </head>
 <body>
 
-<header>
+<header class="topbar">
   <div class="wrap">
-    <h1>Vault Dweller — Privacy Policy</h1>
-    <p class="sub">A developer tool for Veeva Vault that runs entirely in your browser.</p>
-    <div class="meta">
-      <span>Last updated: 20 September 2026</span>
-      <span>Applies to: all versions from 1.0.0</span>
+    <div class="brand">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="#c08a2e" stroke-width="1.8" aria-hidden="true">
+        <rect x="3" y="5" width="22" height="18" rx="3"></rect>
+        <circle cx="14" cy="14" r="4.5"></circle>
+        <path d="M14 9.5v-1.5M14 20v-1.5M18.5 14h1.5M8 14h1.5"></path>
+      </svg>
+      <span>Vault Dweller</span>
+    </div>
+    <div class="topmeta">
+      <span>Privacy policy</span>
+      <span>Updated 28 Sep 2026</span>
+      <span>Applies to v1.0.0+</span>
     </div>
   </div>
 </header>
 
-<main class="wrap">
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <div class="hero-kicker">No backend · No telemetry · No tracking</div>
+      <h1>Nothing is sent to us. There’s nowhere for it to go.</h1>
+      <p>Vault Dweller is a developer tool for Veeva Vault that runs entirely in your browser. Everything it remembers is stored locally, on your own device.</p>
+    </div>
 
-  <div class="lede">
-    <p>Vault Dweller has <strong>no backend server</strong>. No data of any kind is sent to
-    the developer — there is nowhere for it to go. Everything the extension remembers is
-    stored locally on your own device.</p>
+    <div class="flow">
+      <div class="flow-head">
+        <span>Where your data can go</span>
+        <span class="from">from: your browser</span>
+      </div>
+
+      <div class="flow-row">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#f5f2e9" stroke-width="1.6" aria-hidden="true"><path d="M4 10h11M11 6l4 4-4 4"></path></svg>
+        <div class="what">
+          <b>Your own Vault</b>
+          <span>Exactly as it would from the Vault tab</span>
+        </div>
+        <span class="pill always">Always</span>
+      </div>
+
+      <div class="flow-row">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#c08a2e" stroke-width="1.6" aria-hidden="true"><path d="M4 10h11M11 6l4 4-4 4"></path></svg>
+        <div class="what">
+          <b>AI provider you choose</b>
+          <span>Your question and Vault configuration. Never records.</span>
+        </div>
+        <span class="pill optin">Opt-in</span>
+      </div>
+
+      <div class="flow-row">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#c08a2e" stroke-width="1.6" aria-hidden="true"><path d="M4 10h11M11 6l4 4-4 4"></path></svg>
+        <div class="what">
+          <b>docs.veevavault.dev</b>
+          <span>Your question only. No credentials.</span>
+        </div>
+        <span class="pill optin">Opt-in</span>
+      </div>
+
+      <div class="flow-row">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#7d7866" stroke-width="1.6" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"></path></svg>
+        <div class="what">
+          <b class="struck">The developer</b>
+          <span>There is no server to receive it</span>
+        </div>
+        <span class="pill never">Never</span>
+      </div>
+    </div>
   </div>
+</section>
 
-  <h2>The short version</h2>
-  <ul>
-    <li>Nothing is sent to us. No analytics, no telemetry, no tracking, no advertising.</li>
-    <li>Your Vault data goes only to your own Vault, exactly as it would in the browser tab.</li>
-    <li>If — and only if — you turn on the AI feature, your question and a small slice of your
-      Vault's <strong>configuration</strong> go to the AI provider you chose, using your own
-      API key.</li>
-    <li>Your Vault <strong>records</strong> are never sent to an AI provider.</li>
-  </ul>
-
-  <h2>What the extension stores on your device</h2>
-  <p>All of this lives in Chrome's local extension storage, on your machine. None of it is
-  transmitted to us or to anyone else.</p>
-
-  <div class="card">
-    <table>
-      <thead>
-        <tr><th scope="col">Stored</th><th scope="col">Why</th></tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td data-label="Stored">Your Vault domain</td>
-          <td data-label="Why">To reconnect to the same Vault next time</td>
-        </tr>
-        <tr>
-          <td data-label="Stored">Query history</td>
-          <td data-label="Why">So you can re-run recent VQL</td>
-        </tr>
-        <tr>
-          <td data-label="Stored">Cached object and document-type metadata</td>
-          <td data-label="Why">So the data model browser and autocomplete work without re-fetching</td>
-        </tr>
-        <tr>
-          <td data-label="Stored">Your AI provider API key</td>
-          <td data-label="Why">To authenticate requests to the provider you chose</td>
-        </tr>
-      </tbody>
-    </table>
+<section class="short">
+  <div class="wrap">
+    <div class="short-head">
+      <h2>The short version</h2>
+      <span class="eyebrow">Read in 20 seconds</span>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <span class="num">01</span>
+        <p class="lead">Nothing is sent to us.</p>
+        <p class="sub">No analytics, no telemetry, no tracking, no advertising.</p>
+      </div>
+      <div class="card">
+        <span class="num">02</span>
+        <p class="lead">Vault data stays with Vault.</p>
+        <p class="sub">It goes only to your own Vault, exactly as it would in the browser tab.</p>
+      </div>
+      <div class="card">
+        <span class="num">03</span>
+        <p class="lead">AI is off until you turn it on.</p>
+        <p class="sub">Then your question and a slice of Vault configuration go to the provider you chose, on your own key.</p>
+      </div>
+      <div class="card dark">
+        <span class="num">04</span>
+        <p class="lead">Records are never sent to AI.</p>
+        <p class="sub">Query results, document contents and field values stay in your browser.</p>
+      </div>
+    </div>
   </div>
+</section>
 
-  <p>The API key is held by the extension's background service worker and is
-  <strong>never exposed to the extension's own interface pages</strong>. It is sent only to
-  the AI provider you selected, over HTTPS.</p>
+<main class="body wrap">
 
-  <p>You can delete all of it at any time: use <strong>Remove</strong> to delete the API key,
-  <strong>Clear</strong> to delete query history, or uninstall the extension, which removes
-  everything Chrome has stored for it.</p>
+  <nav class="rail" aria-label="On this page">
+    <span class="eyebrow">On this page</span>
+    <a href="#stored"><span class="num">01</span>Stored on your device</a>
+    <a href="#session"><span class="num">02</span>Your Vault session</a>
+    <a href="#ai"><span class="num">03</span>The AI feature</a>
+    <a href="#not"><span class="num">04</span>What we do not do</a>
+    <a href="#other"><span class="num">05</span>Children, changes, contact</a>
+  </nav>
 
-  <h2>Your Vault session</h2>
-  <p>To call the Vault API as you, the extension reads the Veeva Vault session cookie
-  (<code>TK</code>) for the Vault domain you are signed in to. This cookie is used only to
-  authenticate requests to that same Vault. It is never sent anywhere else, never stored by
-  the extension, and no cookie is read from any other site.</p>
+  <div class="sections">
 
-  <h2>Where data goes when you use the AI feature</h2>
-  <p>The AI feature is off until you enter an API key. When you ask a question, the following
-  leaves your browser.</p>
+    <section id="stored">
+      <div class="sec-head">
+        <span class="num">01</span>
+        <h2>What the extension stores on your device</h2>
+      </div>
+      <p>All of this lives in Chrome’s local extension storage, on your machine. None of it is transmitted to us or to anyone else.</p>
 
-  <h3>To the AI provider you selected</h3>
-  <p>Anthropic, OpenAI or Google, per your choice, authenticated with your own API key:</p>
-  <ul>
-    <li>the question you typed;</li>
-    <li>documentation passages retrieved for that question;</li>
-    <li>a selection of your Vault's <strong>configuration</strong> relevant to the question:
-      object API names, field API names and types, document type names and labels, document
-      counts where you have counted them, and the VQL currently in the editor.</li>
-  </ul>
-  <p>The extension shows you what was included with each answer, on the chip beside the
-  answer's citations.</p>
+      <div class="table">
+        <div class="row head"><span>Stored</span><span>Why</span></div>
+        <div class="row"><b>Your Vault domain</b><span class="why">To reconnect to the same Vault next time</span></div>
+        <div class="row"><b>Query history</b><span class="why">So you can re-run recent VQL</span></div>
+        <div class="row"><b>Cached object and document-type metadata</b><span class="why">So the data model browser and autocomplete work without re-fetching</span></div>
+        <div class="row"><b>Your AI provider API key</b><span class="why">To authenticate requests to the provider you chose</span></div>
+      </div>
 
-  <div class="never">
-    <p><strong>Vault record data is never sent to an AI provider.</strong> Query results,
-    document contents and field values do not leave your browser.</p>
+      <p>The API key is held by the extension’s background service worker and is <strong>never exposed to the extension’s own interface pages</strong>. It is sent only to the AI provider you selected, over HTTPS.</p>
+
+      <div>
+        <span class="eyebrow">Delete it any time</span>
+        <div class="trio" style="margin-top: 14px">
+          <div class="chip-card"><b>Remove</b><span>Deletes the API key</span></div>
+          <div class="chip-card"><b>Clear</b><span>Deletes query history</span></div>
+          <div class="chip-card"><b>Uninstall</b><span>Removes everything Chrome stored for it</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="session">
+      <div class="sec-head">
+        <span class="num">02</span>
+        <h2>Your Vault session</h2>
+      </div>
+      <p>To call the Vault API as you, the extension reads the Veeva Vault session cookie (<code>TK</code>) for the Vault domain you are signed in to. This cookie is used only to authenticate requests to that same Vault.</p>
+      <div class="facts">
+        <div class="fact"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#17160f" stroke-width="1.8" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"></path></svg><span>Never sent anywhere else</span></div>
+        <div class="fact"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#17160f" stroke-width="1.8" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"></path></svg><span>Never stored by the extension</span></div>
+        <div class="fact"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#17160f" stroke-width="1.8" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"></path></svg><span>No cookie read from any other site</span></div>
+      </div>
+    </section>
+
+    <section id="ai">
+      <div class="sec-head">
+        <span class="num">03</span>
+        <h2>The AI feature</h2>
+      </div>
+      <p>Off until you enter an API key. When you ask a question, this is what leaves your browser — and nothing else.</p>
+
+      <div class="disclose">
+        <span class="eyebrow">To the provider you chose, on your own key</span>
+        <ul>
+          <li><span>The question you typed</span></li>
+          <li><span>Documentation passages retrieved for it</span></li>
+          <li><span>A slice of your Vault’s <strong>configuration</strong>: object and field API names and types, document type names, and the VQL in the editor</span></li>
+        </ul>
+        <p class="sub" style="font-size: 15px; color: var(--text-2)"><code>docs.veevavault.dev</code> receives the question only. No credentials are sent. Each answer shows exactly what was included, on the chip beside its citations.</p>
+      </div>
+
+      <div class="callout">
+        <svg width="44" height="44" viewBox="0 0 44 44" fill="none" stroke="#c08a2e" stroke-width="2" aria-hidden="true">
+          <rect x="9" y="19" width="26" height="19" rx="3"></rect>
+          <path d="M15 19v-5a7 7 0 0 1 14 0v5"></path>
+          <path d="M22 26v5"></path>
+        </svg>
+        <div>
+          <p class="display">Vault record data is never sent to an AI provider.</p>
+          <p>Query results, document contents and field values do not leave your browser.</p>
+        </div>
+      </div>
+
+      <div class="links">
+        <span>Those services are governed by their own policies:</span>
+        <a href="https://www.anthropic.com/legal/privacy" rel="noopener noreferrer">Anthropic</a>
+        <a href="https://openai.com/policies/privacy-policy" rel="noopener noreferrer">OpenAI</a>
+        <a href="https://policies.google.com/privacy" rel="noopener noreferrer">Google AI</a>
+      </div>
+    </section>
+
+    <section id="not">
+      <div class="sec-head">
+        <span class="num">04</span>
+        <h2>What we do not do</h2>
+      </div>
+      <div class="nots">
+        <div><span>✕</span><span>We do not sell or transfer your data to third parties for advertising or any other unrelated purpose.</span></div>
+        <div><span>✕</span><span>We do not use your data for creditworthiness or lending purposes.</span></div>
+        <div><span>✕</span><span>We do not use your data for any purpose unrelated to the extension’s single function: working with Veeva Vault data and its API.</span></div>
+        <div><span>✕</span><span>We collect nothing ourselves, so there is nothing for us to share, retain, or breach.</span></div>
+      </div>
+    </section>
+
+    <section id="other">
+      <div>
+        <h3>Children</h3>
+        <p>The extension is a professional developer tool and is not directed at children.</p>
+      </div>
+      <div>
+        <h3>Changes</h3>
+        <p>Material changes will be published here with an updated date, alongside the release that introduces them.</p>
+      </div>
+      <div>
+        <h3>Contact</h3>
+        <p>Questions about this policy:<br /><a href="mailto:kristof.domokos.szabo@gmail.com">kristof.domokos.szabo@gmail.com</a></p>
+      </div>
+    </section>
+
   </div>
-
-  <h3>To <code>docs.veevavault.dev</code></h3>
-  <p>Veeva's public documentation service receives the question you typed, in order to
-  retrieve relevant documentation passages. No credentials are sent.</p>
-
-  <p>Your use of those services is governed by their own privacy policies and terms:</p>
-  <ul>
-    <li><a href="https://www.anthropic.com/legal/privacy" rel="noopener noreferrer">Anthropic</a></li>
-    <li><a href="https://openai.com/policies/privacy-policy" rel="noopener noreferrer">OpenAI</a></li>
-    <li><a href="https://policies.google.com/privacy" rel="noopener noreferrer">Google AI</a></li>
-  </ul>
-
-  <h2>What we do not do</h2>
-  <ul>
-    <li>We do not sell or transfer your data to third parties for advertising or any other
-      unrelated purpose.</li>
-    <li>We do not use your data for creditworthiness or lending purposes.</li>
-    <li>We do not use your data for any purpose unrelated to the extension's single function:
-      working with Veeva Vault data and its API.</li>
-    <li>We collect nothing ourselves, so there is nothing for us to share, retain, or breach.</li>
-  </ul>
-
-  <h2>Children</h2>
-  <p>The extension is a professional developer tool and is not directed at children.</p>
-
-  <h2>Changes</h2>
-  <p>Material changes to this policy will be published here with an updated date, alongside
-  the extension release that introduces them.</p>
-
-  <h2>Contact</h2>
-  <p>Questions about this policy:
-  <a href="mailto:kristof.domokos.szabo@gmail.com">kristof.domokos.szabo@gmail.com</a></p>
-
-  <footer>
-    <p>Vault Dweller is an independent tool. It is not affiliated with, endorsed by, or
-    sponsored by Veeva Systems Inc. “Veeva” and “Vault” are trademarks of their respective
-    owners.</p>
-  </footer>
-
 </main>
+
+<footer>
+  <div class="wrap">
+    <p>Vault Dweller is an independent tool. It is not affiliated with, endorsed by, or sponsored by Veeva Systems Inc. “Veeva” and “Vault” are trademarks of their respective owners.</p>
+    <span class="nothing">This page loads nothing from third parties.</span>
+  </div>
+</footer>
 
 </body>
 </html>
