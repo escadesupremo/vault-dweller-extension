@@ -5,7 +5,9 @@
   const IFRAME_ID = "vault-dweller-overlay-iframe";
   const WRAP_ID = "vault-dweller-overlay-wrap";
 
-  function create() {
+  // `resume` names loads the full window was part-way through when it collapsed
+  // back to the panel ("model", "types"), so the panel starts them again.
+  function create(resume) {
     const wrap = document.createElement("div");
     wrap.id = WRAP_ID;
     Object.assign(wrap.style, {
@@ -32,7 +34,8 @@
 
     const iframe = document.createElement("iframe");
     iframe.id = IFRAME_ID;
-    iframe.src = chrome.runtime.getURL("popup.html");
+    const loads = String(resume || "").replace(/[^a-z,]/g, "");
+    iframe.src = chrome.runtime.getURL("popup.html") + (loads ? `?resume=${loads}` : "");
     Object.assign(iframe.style, {
       width: "100%",
       height: "100%",
@@ -71,8 +74,8 @@
     }
   }
 
-  function open() {
-    if (!document.getElementById(WRAP_ID)) create();
+  function open(resume) {
+    if (!document.getElementById(WRAP_ID)) create(resume);
   }
 
   function close() {
@@ -82,7 +85,7 @@
   chrome.runtime.onMessage.addListener((msg) => {
     if (!msg) return;
     if (msg.action === "toggleOverlay") toggle();
-    if (msg.action === "openOverlay") open();
+    if (msg.action === "openOverlay") open(msg.resume);
   });
 
   function setHeight(px) {

@@ -80,7 +80,12 @@ const editorGutter = $("#editor-gutter");
 
 // popup.html serves both the overlay iframe and the full-window tab. The mode is
 // fixed for the lifetime of the page, so layout decisions can be made once.
-const WINDOW_MODE = new URLSearchParams(location.search).get("mode") === "window";
+const PAGE_PARAMS = new URLSearchParams(location.search);
+const WINDOW_MODE = PAGE_PARAMS.get("mode") === "window";
+
+// Loads the previous view was part-way through when it handed over (see
+// handoffLoads). Started again once this view has connected.
+const handedLoads = new Set((PAGE_PARAMS.get("resume") || "").split(","));
 
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 const RUN_KEY_LABEL = IS_MAC ? "⌘↵" : "Ctrl ↵";
@@ -123,10 +128,21 @@ if (WINDOW_MODE) {
   resultsContainer.dataset.empty = `Run a query to see its rows here · ${RUN_KEY_LABEL}`;
 }
 
+// Closing this view abandons any model or type load still running, so the next
+// view is told to start it again rather than coming up without it.
+function handoffLoads() {
+  return [modelLoading && "model", dtLoading && "types"].filter(Boolean).join(",");
+}
+
 expandBtn.addEventListener("click", async () => {
   // Build the query string outside getURL — it takes a path, and a version that
   // escapes or drops the "?" would open the popup layout instead of the window one.
-  const url = `${chrome.runtime.getURL("popup.html")}?mode=window`;
+  // The vault goes along by name: from its own tab the window cannot tell which
+  // of several open Vault tabs the panel was working in.
+  const query = new URLSearchParams({ mode: "window" });
+  if (state.domain) query.set("vault", state.domain);
+  if (handoffLoads()) query.set("resume", handoffLoads());
+  const url = `${chrome.runtime.getURL("popup.html")}?${query}`;
   await chrome.tabs.create({ url });
   closeOverlay();
 });
@@ -134,10 +150,13 @@ expandBtn.addEventListener("click", async () => {
 // Only close this tab once the overlay is actually back up, so a missing Vault
 // tab or an uninjected content script can't collapse the panel into nothing.
 collapseBtn.addEventListener("click", async () => {
-  const [tab] = await chrome.tabs.query({ url: "https://*.veevavault.com/*" });
+  const vaultTabs = await chrome.tabs.query({ url: "https://*.veevavault.com/*" });
+  // Back into the vault this window was working in, not whichever Vault tab
+  // happens to be listed first.
+  const tab = vaultTabs.find((t) => hostOf(t.url) === state.domain) || vaultTabs[0];
   if (!tab?.id) return;
   try {
-    await chrome.tabs.sendMessage(tab.id, { action: "openOverlay" });
+    await chrome.tabs.sendMessage(tab.id, { action: "openOverlay", resume: handoffLoads() });
   } catch (e) {
     return;
   }
@@ -198,25 +217,42 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (WINDOW_MODE) initWorkbench(saved);
   renderHistory();
 
-  // Try to detect domain from active tab
   try {
-    // Look for a Vault tab across all windows (popup runs in its own window).
-    let vaultTabs = await chrome.tabs.query({ url: "https://*.veevavault.com/*" });
-    let tab = vaultTabs.find((t) => t.active) || vaultTabs[0];
-    if (!tab) {
-      [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    }
-    if (tab?.url) {
-      const url = new URL(tab.url);
-      if (isVaultHost(url.hostname)) {
-        domainInput.value = url.hostname;
-        autoConnect(url.hostname);
+    let domain = handedVault();
+    if (!domain) {
+      // Look for a Vault tab across all windows (popup runs in its own window).
+      // From the full window the extension's own tab is the active one, so the
+      // vault last connected to is a better guess than "active" there.
+      const vaultTabs = await chrome.tabs.query({ url: "https://*.veevavault.com/*" });
+      let tab =
+        (WINDOW_MODE && vaultTabs.find((t) => hostOf(t.url) === saved.vaultDomain)) ||
+        vaultTabs.find((t) => t.active) ||
+        vaultTabs[0];
+      if (!tab) {
+        [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
       }
+      domain = hostOf(tab?.url);
+    }
+    if (isVaultHost(domain)) {
+      domainInput.value = domain;
+      autoConnect(domain);
     }
   } catch (e) {
     // user can connect manually
   }
 });
+
+// The vault this page was opened for, when that is known rather than guessed:
+// the overlay from the Vault page it is embedded in, the full window from the
+// panel that opened it. Guessing from open tabs picked the wrong vault whenever
+// more than one was open.
+function handedVault() {
+  const known = [PAGE_PARAMS.get("vault")];
+  if (!WINDOW_MODE && location.ancestorOrigins?.length) {
+    known.unshift(hostOf(location.ancestorOrigins[0]));
+  }
+  return known.find(isVaultHost) || null;
+}
 
 // ===================== TABS =====================
 function activatePane(name) {
@@ -364,9 +400,53 @@ async function autoConnect(domain) {
   showUserInfo(userResult.data);
   showVqlPanel();
 
-  // Per-instance data model: load from storage if present, else prompt the user.
+  // Per-instance data model and document types: load from storage if present,
+  // else the chips prompt the user.
   await loadDataModelForDomain(domain);
+  await loadDocTypesForDomain(domain);
+  resumeHandedLoads();
 }
+
+function resumeHandedLoads() {
+  if (!handedLoads.has("model") && !handedLoads.has("types")) return;
+  if (handedLoads.has("model")) loadDataModel();
+  if (handedLoads.has("types")) loadDocTypes();
+  handedLoads.clear();
+  // Once only: a reload of this page shouldn't start the loads over again.
+  const url = new URL(location.href);
+  url.searchParams.delete("resume");
+  history.replaceState(null, "", url);
+}
+
+// Per-vault caches share chrome.storage.local's 10 MB with every other vault
+// loaded before. If a write doesn't fit, keep only this vault's entry and try
+// once more: the others can be loaded again, this one was just paid for.
+async function saveVaultCache(key, domain, entry) {
+  const all = (await chrome.storage.local.get([key]))[key] || {};
+  all[domain] = entry;
+  try {
+    await chrome.storage.local.set({ [key]: all });
+  } catch (e) {
+    await chrome.storage.local.set({ [key]: { [domain]: entry } });
+  }
+}
+
+// Another view of the same vault — the panel in a Vault tab, the full window in
+// its own tab — can load the model or the types while this one is open. Take
+// what it saved instead of offering to load it again. A view's own saves come
+// back here too; the timestamps tell them apart.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !state.domain) return;
+  const model = changes.dataModels?.newValue?.[state.domain];
+  if (model?.model && model.time !== dataModelTime && !modelLoading) {
+    state.dataModel = model.model;
+    onDataModelLoaded(model.time);
+  }
+  const types = changes.docTypeCache?.newValue?.[state.domain];
+  if (types?.types?.length && types.time !== docTypesTime && !dtLoading && !dtCounting) {
+    applyDocTypes(types.types, types.time);
+  }
+});
 
 // ===================== PER-INSTANCE DATA MODEL =====================
 async function loadDataModelForDomain(domain) {
@@ -486,6 +566,8 @@ disconnectBtn.addEventListener("click", () => {
   fieldStatsFailed.clear();
   clearTimeout(fieldStatsTimer);
   docTypes = [];
+  docTypesTime = null;
+  dataModelTime = null;
   dtSelected = null;
   dtLayout.classList.add("hidden");
   dtTree.innerHTML = "";
@@ -1417,15 +1499,22 @@ async function loadDataModel() {
 
     state.dataModel = { objects };
     const loadTime = new Date().toISOString();
-    // Save under the current vault domain so each instance has its own model.
-    const cur = await chrome.storage.local.get(["dataModels"]);
-    const dataModels = cur.dataModels || {};
+    // Save under the current vault domain so each instance has its own model,
+    // and the panel and the full window both start with it. A failed save only
+    // costs the next view; the model is loaded here either way.
+    let unsaved = null;
     if (state.domain) {
-      dataModels[state.domain] = { model: state.dataModel, time: loadTime };
-      await chrome.storage.local.set({ dataModels });
+      try {
+        await saveVaultCache("dataModels", state.domain, { model: state.dataModel, time: loadTime });
+      } catch (e) {
+        unsaved = e;
+      }
     }
 
     onDataModelLoaded(loadTime);
+    if (unsaved) {
+      setChipState("loaded", { title: `Loaded, but not saved for next time: ${unsaved.message}` });
+    }
   } catch (err) {
     setChipState("failed", { title: `Load failed: ${err.message} — click to retry` });
     dmTree.innerHTML = `<div class="dm-empty">Could not load the data model.<br />${esc(err.message)}</div>`;
@@ -1472,8 +1561,13 @@ function extractFields(objName, res) {
   }));
 }
 
+// When the model on screen was loaded, so a save echoed back by
+// storage.onChanged can be told from one made by another view.
+let dataModelTime = null;
+
 function onDataModelLoaded(timeStr) {
   if (!state.dataModel) return;
+  dataModelTime = timeStr || null;
 
   const objCount = state.dataModel.objects.length;
   const fieldCount = state.dataModel.objects.reduce((s, o) => s + o.fields.length, 0);
@@ -2458,6 +2552,7 @@ const dtFieldCount = $("#dt-field-count");
 const DT_BATCH = 5;          // concurrent type fetches
 
 let docTypes = [];
+let docTypesTime = null;     // when the types on screen were loaded or counted
 let dtSelected = null;
 let dtSortDirection = null; // null | "desc" | "asc"
 let dtCounting = false;
@@ -2590,21 +2685,114 @@ async function loadDocTypes() {
       });
     }
 
-    docTypes = types;
-    renderDocTypeList();
-    dtLayout.classList.remove("hidden");
-    dtEmpty.classList.add("hidden");
-
-    const failed = types.filter((t) => t.error).length;
-    const withFields = types.filter((t) => t.properties).length;
-    const summary =
-      `${types.length} types · ${withFields} with fields` + (failed ? ` · ${failed} failed` : "");
-    setDtChipState("loaded", { title: `${summary} — click to reload` });
-
+    applyDocTypes(types, new Date().toISOString());
+    // Saved per vault, like the data model, so switching between the panel and
+    // the full window doesn't mean loading them all over again.
+    const unsaved = await saveDocTypes();
+    if (unsaved) {
+      setDtChipState("loaded", { title: `Loaded, but not saved for next time: ${unsaved.message}` });
+    }
   } catch (err) {
     setDtChipState("failed", { title: `Load failed: ${err.message}` });
   } finally {
     dtLoading = false;
+  }
+}
+
+function docTypesSummary(types) {
+  const failed = types.filter((t) => t.error).length;
+  const withFields = types.filter((t) => t.properties).length;
+  return `${types.length} types · ${withFields} with fields` + (failed ? ` · ${failed} failed` : "");
+}
+
+// Puts a set of types on screen: freshly loaded, restored from storage on
+// connect, or saved by another view while this one was open.
+function applyDocTypes(types, time) {
+  const keep = dtSelected?.name;
+  docTypes = types;
+  docTypesTime = time || null;
+  dtSelected = null;
+  dtFields.innerHTML = "";
+  dtBreadcrumb.innerHTML = "";
+  dtStats.classList.add("hidden");
+  paintDtCountControls();
+  renderDocTypeList();
+  dtLayout.classList.remove("hidden");
+  dtEmpty.classList.add("hidden");
+  // A type that was open stays open if it's still there.
+  if (keep) {
+    dtTree.querySelector(`.dt-node[data-name="${CSS.escape(keep)}"] .dt-node-header`)?.click();
+  }
+  const when = time ? ` · loaded ${new Date(time).toLocaleString()}` : "";
+  setDtChipState("loaded", { title: `${docTypesSummary(types)}${when} — click to reload` });
+}
+
+// Only what the Doc Types pane and Ask read. Raw properties carry much more,
+// and across every type of a large vault that runs to megabytes of storage.
+const DT_KEEP_PROPS = [
+  "name", "label", "type", "required", "editable", "repeating", "hidden", "disabled", "scope",
+  "section", "section__v", "sectionPosition", "section_position", "order",
+];
+
+function slimDocType(t) {
+  const pick = (p) =>
+    Object.fromEntries(DT_KEEP_PROPS.filter((k) => p[k] !== undefined).map((k) => [k, p[k]]));
+  return {
+    label: t.label,
+    name: t.name,
+    link: t.link,
+    error: t.error || null,
+    subtypes: t.subtypes || [],
+    properties: t.properties ? t.properties.map(pick) : null,
+    docCount: t.docCount ?? null,
+    countError: t.countError || null,
+  };
+}
+
+// Returns the error when the save fails, so the caller can say so; the types
+// stay loaded in this view either way.
+async function saveDocTypes() {
+  if (!state.domain || !docTypes.length) return null;
+  try {
+    await saveVaultCache("docTypeCache", state.domain, {
+      time: docTypesTime,
+      types: docTypes.map(slimDocType),
+    });
+    return null;
+  } catch (e) {
+    return e;
+  }
+}
+
+async function loadDocTypesForDomain(domain) {
+  const store = await chrome.storage.local.get(["docTypeCache"]);
+  const entry = store.docTypeCache?.[domain];
+  if (entry?.types?.length) applyDocTypes(entry.types, entry.time);
+}
+
+// The count button and sort arrow follow whether the types on screen carry
+// counts — they may have arrived counted, from storage.
+function paintDtCountControls() {
+  const counted = docTypes.filter((t) => t.docCount != null).length;
+  const failed = docTypes.filter((t) => t.countError).length;
+  if (counted || failed) {
+    dtCountBtn.textContent = failed ? `Recount (${failed} failed)` : "Recount records";
+    dtCountBtn.title = `${counted} of ${docTypes.length} types counted`;
+  } else {
+    dtCountBtn.textContent = "Count records";
+    dtCountBtn.title = "";
+  }
+  dtSortDir.disabled = counted === 0;
+  if (!counted) {
+    dtSortDirection = null;
+    dtSortDir.textContent = "↕";
+    dtSortDir.classList.remove("active");
+    dtSortDir.title = "Sort by record count";
+  } else if (!dtSortDirection) {
+    dtSortDirection = "desc";
+    dtSortDir.textContent = "↓";
+    dtSortDir.classList.add("active");
+    dtSortDir.title = "Most records first";
   }
 }
 
@@ -2730,21 +2918,11 @@ async function countDocTypeRecords() {
       renderDocTypeList();
     }
 
-    const counted = docTypes.filter((t) => t.docCount != null).length;
-    const failed = docTypes.filter((t) => t.countError).length;
-    dtCountBtn.textContent = failed
-      ? `Recount (${failed} failed)`
-      : "Recount records";
-    dtCountBtn.title = `${counted} of ${total} types counted`;
-
-    dtSortDir.disabled = counted === 0;
-    if (counted && !dtSortDirection) {
-      dtSortDirection = "desc";
-      dtSortDir.textContent = "↓";
-      dtSortDir.classList.add("active");
-      dtSortDir.title = "Most records first";
-    }
+    paintDtCountControls();
     renderDocTypeList();
+    // Counts are worth keeping too: they cost one query per type.
+    docTypesTime = new Date().toISOString();
+    await saveDocTypes();
   } finally {
     dtCounting = false;
     dtCountBtn.disabled = false;
@@ -4863,4 +5041,12 @@ const VAULT_HOST_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0
 
 function isVaultHost(host) {
   return VAULT_HOST_RE.test(String(host || ""));
+}
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname;
+  } catch (e) {
+    return "";
+  }
 }
