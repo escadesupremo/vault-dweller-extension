@@ -101,7 +101,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
 ----------------------------------------------------------------------
 
-IBM Plex Mono - SIL Open Font License 1.1
+IBM Plex Mono and IBM Plex Sans - SIL Open Font License 1.1
 Copyright IBM Corp. https://github.com/IBM/plex
 
 Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"

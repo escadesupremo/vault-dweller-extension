@@ -33,7 +33,7 @@ const runBtn = $("#run-btn");
 const cancelBtn = $("#cancel-btn");
 const clearBtn = $("#clear-btn");
 const queryTime = $("#query-time");
-const resultsHeader = $("#results-header");
+const resultsPanel = $("#results-panel");
 const resultsCount = $("#results-count");
 const resultsContainer = $("#results-container");
 const copyBtn = $("#copy-btn");
@@ -74,10 +74,23 @@ const topbarChipSlot = $("#topbar-chip-slot");
 const expandBtn = $("#expand-btn");
 const collapseBtn = $("#collapse-btn");
 const closeBtn = $("#close-btn");
+const editorTools = $("#editor-tools");
+const editorHl = $("#editor-hl");
+const editorGutter = $("#editor-gutter");
 
 // popup.html serves both the overlay iframe and the full-window tab. The mode is
 // fixed for the lifetime of the page, so layout decisions can be made once.
 const WINDOW_MODE = new URLSearchParams(location.search).get("mode") === "window";
+
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+const RUN_KEY_LABEL = IS_MAC ? "⌘↵" : "Ctrl ↵";
+
+// The run button's resting face. The workbench gives it the play glyph and its
+// shortcut; runQuery swaps in progress text and puts this back when it's done.
+const RUN_LABEL = WINDOW_MODE
+  ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"/></svg>' +
+    `Run query<span class="run-key">${RUN_KEY_LABEL}</span>`
+  : "Run Query";
 
 let lastResultData = null;
 let acIndex = -1;
@@ -101,6 +114,13 @@ if (WINDOW_MODE) {
   topbarChipSlot.appendChild($("#chip-group"));
   expandBtn.classList.add("hidden");
   collapseBtn.classList.remove("hidden");
+  // The editor's own actions sit on its toolbar, right of the operator chips.
+  editorTools.append(clearBtn, cancelBtn, runBtn);
+  runBtn.innerHTML = RUN_LABEL;
+  runBtn.title =
+    "Runs the query and fetches every page concurrently, up to the Limit when the " +
+    "query has no LIMIT of its own. For stable paging on large sets, include an ORDER BY.";
+  resultsContainer.dataset.empty = `Run a query to see its rows here · ${RUN_KEY_LABEL}`;
 }
 
 expandBtn.addEventListener("click", async () => {
@@ -168,11 +188,14 @@ if (!WINDOW_MODE) {
 
 // ===================== INIT =====================
 document.addEventListener("DOMContentLoaded", async () => {
-  const saved = await chrome.storage.local.get(["vaultDomain", "queryHistory", "dataModels", "dataModel", "dataModelTime"]);
+  const saved = await chrome.storage.local.get([
+    "vaultDomain", "queryHistory", "dataModels", "dataModel", "dataModelTime", "queryTabs", "queryLimit",
+  ]);
   if (saved.vaultDomain) domainInput.value = saved.vaultDomain;
   if (saved.queryHistory) state.history = saved.queryHistory;
   // Per-instance data model loading happens after autoConnect resolves the current domain.
   // Legacy single-key storage is migrated lazily inside loadDataModelForDomain().
+  if (WINDOW_MODE) initWorkbench(saved);
   renderHistory();
 
   // Try to detect domain from active tab
@@ -196,15 +219,17 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 // ===================== TABS =====================
+function activatePane(name) {
+  $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
+  $$(".tab-content").forEach((c) => c.classList.toggle("active", c.id === `tab-${name}`));
+  // Full-window mode force-shows panes as a sidebar plus a main column, so the
+  // layout has to know which pane owns the main column.
+  vqlPanel.dataset.activeTab = name;
+}
+
 $$(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
-    $$(".tab").forEach((t) => t.classList.remove("active"));
-    $$(".tab-content").forEach((c) => c.classList.remove("active"));
-    tab.classList.add("active");
-    $(`#tab-${tab.dataset.tab}`).classList.add("active");
-    // Full-window mode force-shows panes as a sidebar plus a main column, so the
-    // layout has to know which pane owns the main column.
-    vqlPanel.dataset.activeTab = tab.dataset.tab;
+    activatePane(tab.dataset.tab);
     if (tab.dataset.tab === "ask") refreshAskAvailability();
   });
 });
@@ -417,9 +442,11 @@ function showUserInfo(data) {
   }
   whoamiBtn.classList.remove("hidden");
 
+  // Only the full window shows this; the pill has room for the address, and the
+  // security profile rides along in the tooltip.
   const who = [u.user_email__v || u.user_name__v, u.security_profile__v].filter(Boolean);
-  topbarUser.textContent = who.join(" · ");
-  topbarUser.title = topbarUser.textContent;
+  topbarUser.textContent = who[0] || "";
+  topbarUser.title = who.join(" · ");
 }
 
 function showVqlPanel() {
@@ -429,6 +456,8 @@ function showVqlPanel() {
   historyBtn.classList.remove("hidden");
   vqlInput.focus();
   paintTabThumb();
+  // The editor was sized while hidden, when it measured nothing.
+  if (WINDOW_MODE) paintEditor();
 }
 
 // ===================== DISCONNECT =====================
@@ -464,9 +493,10 @@ disconnectBtn.addEventListener("click", () => {
   dtEmpty.classList.remove("hidden");
   setDtChipState("idle");
   resultsContainer.innerHTML = "";
-  resultsHeader.classList.add("hidden");
+  setResultsShown(false);
   queryTime.textContent = "";
   lastResultData = null;
+  resetResultsView();
 });
 
 // Popover toggles — close others when opening one
@@ -508,15 +538,17 @@ cancelBtn.addEventListener("click", () => {
 // buttons would hand back rows for a query that isn't on screen.
 clearBtn.addEventListener("click", () => {
   vqlInput.value = "";
+  editorChanged();
   historyNavIndex = -1;
   hideAc();
   resultsContainer.innerHTML = "";
   resultsContainer.style.maxHeight = "";
-  resultsHeader.classList.add("hidden");
+  setResultsShown(false);
   queryTime.textContent = "";
   lastResultData = null;
   queryRows = [];
   pendingEdits = {};
+  resetResultsView();
   updateSaveBar();
   vqlInput.focus();
 });
@@ -565,6 +597,7 @@ vqlInput.addEventListener("keydown", (e) => {
       e.preventDefault();
       vqlInput.value = template;
       vqlInput.setSelectionRange(template.length, template.length);
+      editorChanged();
       return;
     }
   }
@@ -583,6 +616,7 @@ vqlInput.addEventListener("keydown", (e) => {
       historyNavIndex = Math.min(historyNavIndex + 1, navigable.length - 1);
       vqlInput.value = navigable[historyNavIndex].query;
       vqlInput.setSelectionRange(vqlInput.value.length, vqlInput.value.length);
+      editorChanged();
       return;
     }
 
@@ -597,12 +631,14 @@ vqlInput.addEventListener("keydown", (e) => {
       vqlInput.value = navigable[historyNavIndex].query;
       vqlInput.setSelectionRange(vqlInput.value.length, vqlInput.value.length);
     }
+    editorChanged();
   }
 });
 
 vqlInput.addEventListener("input", () => {
   // Any manual edit exits history-navigation mode.
   historyNavIndex = -1;
+  editorChanged();
   showAutocomplete();
 });
 
@@ -633,6 +669,7 @@ function insertAtCursor(text, cursorOffset = null) {
     : insertStart + text.length;
   vqlInput.setSelectionRange(newPos, newPos);
   vqlInput.focus();
+  editorChanged();
   // Reset history navigation since the user is now editing.
   historyNavIndex = -1;
 }
@@ -757,27 +794,36 @@ async function runQuery() {
   cancelBtn.classList.remove("hidden");
   queryTime.textContent = "";
   resultsContainer.innerHTML = "";
-  resultsHeader.classList.add("hidden");
+  setResultsShown(false);
   lastResultData = null;
+  resetResultsView();
 
   const token = { aborted: false };
   activeQueryToken = token;
+  setQueryBusy(true);
 
-  const userLimit = extractVqlTopLimit(raw);
+  // A LIMIT written in the query wins over the toolbar's Limit.
+  const userLimit = extractVqlTopLimit(raw) ?? uiRowLimit();
   const baseQuery = stripVqlTrailingPaging(raw);
   const startTime = performance.now();
 
   // --- First page: also tells us responseDetails.total ---
-  const firstQ = `${baseQuery} PAGESIZE ${FETCH_ALL_PAGE_SIZE} PAGEOFFSET 0`;
+  // Under a limit smaller than a page, ask for just that many rows; the page
+  // count below then comes out as one and nothing more is fetched.
+  const firstPageSize = userLimit != null && userLimit > 0
+    ? Math.min(FETCH_ALL_PAGE_SIZE, userLimit)
+    : FETCH_ALL_PAGE_SIZE;
+  const firstQ = `${baseQuery} PAGESIZE ${firstPageSize} PAGEOFFSET 0`;
   const firstResult = await apiCall("/query", "POST", `q=${encodeURIComponent(firstQ)}`);
 
   const resetButton = () => {
     runBtn.disabled = false;
-    runBtn.innerHTML = "Run Query";
+    runBtn.innerHTML = RUN_LABEL;
     cancelBtn.classList.add("hidden");
     cancelBtn.disabled = false;
     cancelBtn.innerHTML = "Cancel";
     if (activeQueryToken === token) activeQueryToken = null;
+    setQueryBusy(false);
   };
 
   const handleAbort = () => {
@@ -894,7 +940,8 @@ async function runQuery() {
 
   const finalRows = userLimit != null ? merged.slice(0, userLimit) : merged;
 
-  const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+  const elapsedMs = performance.now() - startTime;
+  const elapsed = (elapsedMs / 1000).toFixed(2);
   queryTime.textContent = completed > 1
     ? `${elapsed}s · ${completed} pages`
     : `${elapsed}s`;
@@ -916,8 +963,18 @@ async function runQuery() {
 
   if (finalRows.length > 0) {
     const ofTotal = reportedTotal != null && reportedTotal > finalRows.length ? ` of ${reportedTotal}` : "";
-    resultsCount.textContent = `${finalRows.length} record${finalRows.length !== 1 ? "s" : ""}${ofTotal}`;
-    resultsHeader.classList.remove("hidden");
+    if (WINDOW_MODE) {
+      // Rows and time in one readout; the run button no longer has a line under
+      // it for the timing to sit on.
+      const n = finalRows.length;
+      const pages = completed > 1 ? ` · ${completed} pages` : "";
+      const of = ofTotal ? ` of ${reportedTotal.toLocaleString()}` : "";
+      resultsCount.textContent =
+        `${n.toLocaleString()}${of} row${n !== 1 ? "s" : ""} · ${formatMs(elapsedMs)}${pages}`;
+    } else {
+      resultsCount.textContent = `${finalRows.length} record${finalRows.length !== 1 ? "s" : ""}${ofTotal}`;
+    }
+    setResultsShown(true);
     // Large result sets: skip the in-popup table render (it would freeze the UI)
     // and stream straight to an xlsx download. Copy/CSV/Excel buttons remain
     // available so the user can re-export from lastResultData if needed.
@@ -930,8 +987,14 @@ async function runQuery() {
     }
   } else {
     resultsContainer.innerHTML = '<div class="result-message info">Query returned no results.</div>';
-    resultsHeader.classList.add("hidden");
+    setResultsShown(false);
   }
+}
+
+// Every caller that hid or showed the header now goes through here, because the
+// full window keeps the "Results" heading up and only hides the controls.
+function setResultsShown(on) {
+  resultsPanel.classList.toggle("has-results", on);
 }
 
 function showError(msg) {
@@ -1171,13 +1234,17 @@ class SimpleZip {
 // ===================== HISTORY =====================
 function addToHistory(query, success) {
   state.history = state.history.filter((h) => h.query !== query);
-  state.history.unshift({ query, success, ts: Date.now() });
+  const entry = { query, success, ts: Date.now() };
+  // Which query tab ran it, so the recent list can say where it came from.
+  if (WINDOW_MODE && activeTabId) entry.tab = activeTabId;
+  state.history.unshift(entry);
   state.history = state.history.slice(0, 20);
   chrome.storage.local.set({ queryHistory: state.history });
   renderHistory();
 }
 
 function renderHistory() {
+  renderRecent();
   if (state.history.length === 0) {
     historyList.innerHTML = '<div class="history-empty">No queries yet</div>';
     return;
@@ -1193,16 +1260,23 @@ function renderHistory() {
 historyList.addEventListener("click", (e) => {
   const item = e.target.closest(".history-item");
   if (item) {
-    vqlInput.value = state.history[parseInt(item.dataset.index)].query;
     historyPopover.classList.add("hidden");
-    // Switch to query tab
-    $$(".tab").forEach((t) => t.classList.remove("active"));
-    $$(".tab-content").forEach((c) => c.classList.remove("active"));
-    $('[data-tab="query"]').classList.add("active");
-    $("#tab-query").classList.add("active");
-    vqlInput.focus();
+    loadHistoryQuery(parseInt(item.dataset.index));
   }
 });
+
+// Puts a past query in the editor — in the full window, the current tab's —
+// without running it.
+function loadHistoryQuery(index) {
+  const entry = state.history[index];
+  if (!entry) return;
+  vqlInput.value = entry.query;
+  historyNavIndex = -1;
+  activatePane("query");
+  vqlInput.focus();
+  vqlInput.setSelectionRange(vqlInput.value.length, vqlInput.value.length);
+  editorChanged();
+}
 
 clearHistoryBtn.addEventListener("click", () => {
   state.history = [];
@@ -1413,6 +1487,8 @@ function onDataModelLoaded(timeStr) {
   setChipState("loaded", { title: `${summary} — click to reload` });
 
   renderDataModelTree(dmSearch.value.trim().toLowerCase());
+  // Untitled tabs are named after their object's label, which only the model has.
+  if (WINDOW_MODE) renderQueryTabs();
 }
 
 // ===================== DATA MODEL SEARCH =====================
@@ -1420,8 +1496,9 @@ function onDataModelLoaded(timeStr) {
 // bare query like "status" can match several hundred fields across the model.
 const DM_PAGE = 25;
 // An opened object shows only its most-used fields; a 146-field object dumped
-// in full is the thing the search box exists to avoid.
-const DM_TOP_FIELDS = 5;
+// in full is the thing the search box exists to avoid. The full-window sidebar
+// is tall enough for a few more.
+const DM_TOP_FIELDS = WINDOW_MODE ? 8 : 5;
 // A vault carries hundreds of objects, but day-to-day work happens in a handful.
 // These are the landing list; everything else is reached by searching. Names are
 // matched case-insensitively and silently skipped when a vault lacks one, so
@@ -1479,6 +1556,7 @@ function matchesObject(o, filter) {
 }
 
 function groupRowHtml(obj, countText, filter, opts = {}) {
+  if (WINDOW_MODE) return wbGroupRowHtml(obj, countText, filter, opts);
   const { expandable = false, expanded = false } = opts;
   let h = `<div class="dm-group${expanded ? " expanded" : ""}" data-obj="${esc(obj.name)}"`;
   h += expandable ? ` title="Open ${esc(obj.name)}">` : ` title="Insert SELECT … FROM ${esc(obj.name)}">`;
@@ -1519,6 +1597,7 @@ function objectIndexHtml(objects) {
 }
 
 function fieldRowHtml(f, objName, filter) {
+  if (WINDOW_MODE) return wbFieldRowHtml(f, objName, filter);
   let h = `<div class="dm-row" data-field="${esc(f.name)}" data-obj="${esc(objName)}" title="Insert ${esc(f.name)}">`;
   h += `<span class="dm-row-main">`;
   h += `<span class="dm-row-label">${highlight(f.label || f.name, filter)}</span>`;
@@ -1559,6 +1638,15 @@ function renderDataModelTree(filter) {
       .filter(Boolean);
 
     const keepScroll = dmTree.scrollTop;
+    if (WINDOW_MODE) {
+      // The full-window sidebar has the height to list the rest under the
+      // featured ones, one line each, so browsing works as well as searching.
+      const rest = objects.filter((o) => !featured.includes(o));
+      dmTree.innerHTML = wbObjectIndexHtml(featured, rest);
+      dmTree.scrollTop = keepScroll;
+      dmMore.classList.add("hidden");
+      return;
+    }
     dmTree.innerHTML = featured.length
       ? objectIndexHtml(featured)
       : '<div class="dm-empty">Search to find an object or field.</div>';
@@ -1684,17 +1772,13 @@ dmTree.addEventListener("click", (e) => {
   }
 
   const row = e.target.closest(".dm-row");
-  if (row) insertIntoQuery(row.dataset.field);
+  if (!row) return;
+  if (e.shiftKey) addFieldToSelect(row.dataset.field, row.dataset.obj);
+  else insertIntoQuery(row.dataset.field);
 });
 
 function insertIntoQuery(text, replace = false) {
-  // Switch to query tab
-  $$(".tab").forEach((t) => t.classList.remove("active"));
-  $$(".tab-content").forEach((c) => c.classList.remove("active"));
-  $('[data-tab="query"]').classList.add("active");
-  $("#tab-query").classList.add("active");
-  // Full-window mode picks the main column off this attribute.
-  vqlPanel.dataset.activeTab = "query";
+  activatePane("query");
   paintTabThumb();
 
   if (replace) {
@@ -1710,6 +1794,41 @@ function insertIntoQuery(text, replace = false) {
     vqlInput.setSelectionRange(newPos, newPos);
   }
   vqlInput.focus();
+  editorChanged();
+}
+
+// Shift-click on a field: append it to the SELECT list rather than dropping it
+// wherever the cursor happens to be. An empty editor gets a fresh statement.
+function addFieldToSelect(field, objName) {
+  const q = vqlInput.value;
+  if (!q.trim()) {
+    insertIntoQuery(`SELECT ${field}\nFROM ${objName}`, true);
+    vqlInput.setSelectionRange(7 + field.length, 7 + field.length);
+    return;
+  }
+  const span = vqlSelectListSpan(q);
+  if (!span) {
+    insertIntoQuery(field);
+    return;
+  }
+  const list = q.slice(span.start, span.end);
+  const listed = vqlSplitTopLevel(list).map((s) => s.trim().toLowerCase());
+  activatePane("query");
+  vqlInput.focus();
+  if (listed.includes(field.toLowerCase())) {
+    // Already selected — show where, rather than adding it twice. Anchored to
+    // the list's commas so name__v doesn't land inside product__v.name__v.
+    const m = new RegExp(`(^|,)\\s*(${field.replace(/\./g, "\\.")})\\s*(?=,|$)`, "i").exec(list);
+    const at = span.start + (m ? m.index + m[0].indexOf(m[2]) : 0);
+    vqlInput.setSelectionRange(at, at + field.length);
+    return;
+  }
+  const end = span.start + list.replace(/\s+$/, "").length;
+  vqlInput.value = `${q.slice(0, end)}, ${field}${q.slice(end)}`;
+  const caret = end + 2 + field.length;
+  vqlInput.setSelectionRange(caret, caret);
+  historyNavIndex = -1;
+  editorChanged();
 }
 
 // ===================== FIELD FILL STATS =====================
@@ -2001,6 +2120,7 @@ function insertAcItem(item) {
   const newPos = wordStart + item.name.length;
   vqlInput.setSelectionRange(newPos, newPos);
   vqlInput.focus();
+  editorChanged();
 }
 
 function hideAc() {
@@ -2071,6 +2191,15 @@ function renderTable(rows) {
       }
     }
   }
+  resultKeys = keys;
+
+  // The workbench pages, filters and selects; it draws its own table.
+  if (WINDOW_MODE) {
+    resetResultsView();
+    paintResultsView();
+    return;
+  }
+
   const editableFields = getEditableFields(queryObjectName);
   const hasId = keys.includes("id");
   let html = '<table class="results-table"><thead><tr>';
@@ -2123,16 +2252,19 @@ function renderTable(rows) {
     resultsContainer.style.maxHeight =
       `${headH + bodyRows[0].offsetHeight * RESULT_ROW_CAP + frame}px`;
   }
-
-  // Attach click listeners for editable cells
-  resultsContainer.querySelectorAll("td.editable").forEach((td) => {
-    td.addEventListener("click", startEditing);
-  });
-
 }
 
-function startEditing(e) {
-  const td = e.currentTarget;
+// One listener for the life of the page rather than one per cell per render:
+// the table is rebuilt on every run, page turn and filter keystroke.
+resultsContainer.addEventListener("click", (e) => {
+  const tr = e.target.closest("tbody tr[data-row]");
+  if (!tr) return;
+  if (WINDOW_MODE) selectResultRow(parseInt(tr.dataset.row));
+  const td = e.target.closest("td.editable");
+  if (td && !td.classList.contains("editing")) startEditing(td);
+});
+
+function startEditing(td) {
   if (td.classList.contains("editing")) return;
 
   const ri = parseInt(td.dataset.row);
@@ -2154,7 +2286,8 @@ function startEditing(e) {
     const origVal = queryRows[ri][field] === null || queryRows[ri][field] === undefined ? "" : String(queryRows[ri][field]);
 
     td.classList.remove("editing");
-    td.textContent = newVal;
+    td.innerHTML = cellContent(field, newVal);
+    if (WINDOW_MODE) td.title = newVal;
 
     if (newVal !== origVal) {
       td.classList.add("dirty");
@@ -2164,9 +2297,8 @@ function startEditing(e) {
       delete pendingEdits[`${ri}:${field}`];
     }
     updateSaveBar();
-
-    // Re-attach click
-    td.addEventListener("click", startEditing);
+    // The inspector shows the edited value, not the one Vault last returned.
+    if (WINDOW_MODE && resultsView.selected === ri) renderInspector();
   };
 
   input.addEventListener("blur", finish);
@@ -2203,8 +2335,14 @@ function updateSaveBar() {
 // Discard all edits
 discardBtn.addEventListener("click", () => {
   pendingEdits = {};
-  // Re-render the table with original data
-  if (queryRows.length > 0) renderTable(queryRows);
+  // Re-render the table with original data. The workbench repaints in place so
+  // the filter, page and selection survive.
+  if (WINDOW_MODE) {
+    paintResultsView();
+    renderInspector();
+  } else if (queryRows.length > 0) {
+    renderTable(queryRows);
+  }
   updateSaveBar();
 });
 
@@ -2281,6 +2419,7 @@ saveBtn.addEventListener("click", async () => {
   saveBtn.disabled = false;
   saveBtn.innerHTML = "Save Changes";
   updateSaveBar();
+  if (WINDOW_MODE) renderInspector();
 
   if (errors.length > 0) {
     showSaveError(errors.join("\n"));
@@ -2672,7 +2811,9 @@ function splitByLayout(props) {
   return { onLayout, off, detected: true };
 }
 
-function fieldRowHtml(p) {
+// Not fieldRowHtml: that is the data model's row builder, and a second
+// top-level function of the same name silently replaces the first everywhere.
+function dtFieldRowHtml(p) {
   let h = `<div class="dt-field-row" data-fname="${esc(p.name || "")}">`;
   h += `<span class="dt-field-name" title="${esc(p.name || "")}">${esc(p.name || "")}</span>`;
   h += `<span class="dt-field-label">${esc(p.label || "")}</span>`;
@@ -2729,7 +2870,7 @@ function showDocTypeFields(type) {
         (isPinnedLast(a.name) ? 1 : 0) - (isPinnedLast(b.name) ? 1 : 0) ||
         order.get(a) - order.get(b)
     );
-    for (const p of flat) html += fieldRowHtml(p);
+    for (const p of flat) html += dtFieldRowHtml(p);
     dtFields.innerHTML = html;
     return;
   }
@@ -2777,7 +2918,7 @@ function showDocTypeFields(type) {
   for (const name of sectionNames) {
     html += '<div class="dt-section">';
     html += `<div class="dt-section-header">${esc(name)}</div>`;
-    for (const p of groups.get(name)) html += fieldRowHtml(p);
+    for (const p of groups.get(name)) html += dtFieldRowHtml(p);
     html += "</div>";
   }
 
@@ -2788,7 +2929,7 @@ function showDocTypeFields(type) {
     html += `<span class="dt-offlayout-arrow">&#9654;</span> Not on layout (${off.length})`;
     html += `</button>`;
     html += '<div class="dt-offlayout-body">';
-    for (const p of offSorted) html += fieldRowHtml(p);
+    for (const p of offSorted) html += dtFieldRowHtml(p);
     html += "</div></div>";
   }
 
@@ -3755,6 +3896,942 @@ onDataModelLoaded = function (timeStr) {
   const dtTab = document.querySelector('#tab-datatypes.active');
   if (dtTab) renderDataTypes();
 };
+
+// ===================== FULL-WINDOW WORKBENCH =====================
+// popup.html?mode=window is laid out as a workbench: the data model down the
+// left, a tabbed editor over a paged results table in the middle, and an
+// inspector for the selected row on the right. Everything below is either
+// window-only or a no-op in the overlay, whose layout is unchanged.
+
+const queryTabsEl = $("#query-tabs");
+const formatBtn = $("#format-btn");
+const limitSelect = $("#limit-select");
+const resultsFilter = $("#results-filter");
+const columnsBtn = $("#columns-btn");
+const columnsMenu = $("#columns-menu");
+const resultsRange = $("#results-range");
+const resultsHint = $("#results-hint");
+const pagePrev = $("#page-prev");
+const pageNext = $("#page-next");
+const inspEmpty = $("#insp-empty");
+const inspBody = $("#insp-body");
+const inspTitle = $("#insp-title");
+const inspFields = $("#insp-fields");
+const inspOpen = $("#insp-open");
+const inspCopy = $("#insp-copy");
+const recentList = $("#recent-list");
+
+// Called once, from init, in window mode only.
+function initWorkbench(saved) {
+  const stored = saved.queryTabs;
+  const seen = new Set();
+  const tabs = (Array.isArray(stored?.tabs) ? stored.tabs : [])
+    .filter((t) => t && typeof t.id === "string" && !seen.has(t.id) && seen.add(t.id))
+    .map((t) => ({
+      id: t.id,
+      title: typeof t.title === "string" && t.title.trim() ? t.title.trim().slice(0, 60) : null,
+      query: typeof t.query === "string" ? t.query : "",
+    }));
+  queryTabs = tabs.length ? tabs : [blankTab()];
+  activeTabId = queryTabs.some((t) => t.id === stored?.active) ? stored.active : queryTabs[0].id;
+  vqlInput.value = activeTab().query;
+
+  // "All" unless the user has picked a cap: the editor has always fetched every
+  // page, and a silent 100-row default would read as missing data.
+  const limits = [...limitSelect.options].map((o) => o.value);
+  limitSelect.value = limits.includes(saved.queryLimit) ? saved.queryLimit : "";
+
+  // The empty states point at the top bar, where the load chips live here.
+  dmEmptyState.innerHTML =
+    '<div class="dm-empty-title">No data model yet</div>' +
+    "<p>Load it once per vault to browse objects and fields here and get autocomplete in the editor.</p>" +
+    '<button type="button" class="dm-empty-load">Load data model</button>';
+  dtEmpty.innerHTML = "Use <strong>LOAD TYPES</strong> in the top bar.";
+
+  wireWorkbench();
+  paintEditor();
+  renderQueryTabs();
+  resetResultsView();
+  renderRecent();
+  // Relative times ("5 min ago") go stale while the tab sits open.
+  setInterval(renderRecent, 60 * 1000);
+}
+
+function wireWorkbench() {
+  vqlInput.addEventListener("scroll", syncEditorScroll);
+  window.addEventListener("resize", fitEditor);
+
+  formatBtn.addEventListener("click", formatEditor);
+  limitSelect.addEventListener("change", () => {
+    chrome.storage.local.set({ queryLimit: limitSelect.value });
+  });
+
+  queryTabsEl.addEventListener("click", (e) => {
+    if (e.target.closest(".qtab-rename")) return;
+    if (e.target.closest(".qtab-new")) return newQueryTab();
+    const close = e.target.closest("[data-close]");
+    if (close) return closeQueryTab(close.dataset.close);
+    const tab = e.target.closest(".qtab");
+    if (tab) switchQueryTab(tab.dataset.tabId);
+  });
+  queryTabsEl.addEventListener("dblclick", (e) => {
+    const tab = e.target.closest(".qtab");
+    if (tab && !e.target.closest("[data-close], .qtab-rename")) renameQueryTab(tab.dataset.tabId);
+  });
+  // Middle-click closes, as it does for browser tabs.
+  queryTabsEl.addEventListener("auxclick", (e) => {
+    const tab = e.target.closest(".qtab");
+    if (e.button === 1 && tab) closeQueryTab(tab.dataset.tabId);
+  });
+  queryTabsEl.addEventListener("keydown", (e) => {
+    const tab = e.target.closest(".qtab");
+    if (!tab || e.target.closest(".qtab-rename")) return;
+    if (e.key === "F2" || e.key === "Enter") {
+      e.preventDefault();
+      renameQueryTab(tab.dataset.tabId);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      const i = queryTabs.findIndex((t) => t.id === activeTabId);
+      const next = queryTabs[i + (e.key === "ArrowLeft" ? -1 : 1)];
+      if (!next) return;
+      switchQueryTab(next.id);
+      queryTabsEl.querySelector(".qtab.active")?.focus();
+    }
+  });
+
+  resultsFilter.addEventListener("input", () => {
+    if (!resultsView.active) return;
+    resultsView.filter = resultsFilter.value;
+    resultsView.page = 0;
+    paintResultsView();
+    resultsContainer.scrollTop = 0;
+  });
+  pagePrev.addEventListener("click", () => turnResultsPage(-1));
+  pageNext.addEventListener("click", () => turnResultsPage(1));
+
+  columnsBtn.addEventListener("click", () => {
+    if (!columnsMenu.classList.contains("hidden")) return closeColumnsMenu();
+    renderColumnsMenu();
+    columnsMenu.classList.remove("hidden");
+    columnsBtn.setAttribute("aria-expanded", "true");
+  });
+  columnsMenu.addEventListener("change", (e) => {
+    const box = e.target.closest("input[data-col]");
+    if (!box) return;
+    if (box.checked) resultsView.hidden.delete(box.dataset.col);
+    else resultsView.hidden.add(box.dataset.col);
+    columnsMenu.querySelector(".columns-all").disabled = !resultsView.hidden.size;
+    paintColumnsButton();
+    paintResultsView();
+  });
+  columnsMenu.addEventListener("click", (e) => {
+    if (!e.target.closest(".columns-all")) return;
+    resultsView.hidden.clear();
+    paintColumnsButton();
+    paintResultsView();
+    renderColumnsMenu();
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".columns-wrap")) closeColumnsMenu();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeColumnsMenu();
+  });
+
+  inspCopy.addEventListener("click", async () => {
+    const row = queryRows[resultsView.selected];
+    if (!row) return;
+    await navigator.clipboard.writeText(JSON.stringify(row, null, 2));
+    inspCopy.textContent = "Copied";
+    setTimeout(() => (inspCopy.textContent = "Copy JSON"), 1200);
+  });
+
+  recentList.addEventListener("click", (e) => {
+    const item = e.target.closest(".recent-item");
+    if (item) loadHistoryQuery(parseInt(item.dataset.index));
+  });
+
+  dmEmptyState.addEventListener("click", (e) => {
+    if (e.target.closest(".dm-empty-load")) modelChip.click();
+  });
+
+  // Object headings are divs (they hold the SEL button), so they need the
+  // keyboard activation a real button would get for free.
+  dmTree.addEventListener("keydown", (e) => {
+    if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("dm-group")) {
+      e.preventDefault();
+      const name = e.target.dataset.obj;
+      e.target.click();
+      // The click rebuilt the tree; put focus back on the same heading.
+      dmTree.querySelector(`.dm-group[data-obj="${CSS.escape(name)}"]`)?.focus();
+    }
+  });
+
+  // "/" jumps to the data model search from anywhere that isn't a text field.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target.closest?.("input, textarea, select, [contenteditable='true']")) return;
+    if (vqlPanel.classList.contains("hidden") || dmPanel.classList.contains("hidden")) return;
+    e.preventDefault();
+    dmSearch.focus();
+    dmSearch.select();
+  });
+
+  // Flush a debounced save if the tab closes mid-typing.
+  window.addEventListener("pagehide", persistTabs);
+}
+
+// ---- Editor: highlighting and line numbers --------------------------------
+const VQL_KEYWORD_SET = new Set([
+  ...VQL_KEYWORDS.flatMap((k) => k.split(" ")),
+  "IS", "BY", "AS", "PAGESIZE", "PAGEOFFSET", "ESCAPE",
+]);
+
+// Every character lands in exactly one token, so joining the tokens gives back
+// the input — the highlight layer has to line up with the textarea glyph for
+// glyph. Literals come first so a keyword inside quotes stays a literal, and an
+// unterminated one runs to the end rather than flipping colours as you type.
+const VQL_TOKEN_RE = /'(?:[^'\\]|\\.)*'?|\s+|[A-Za-z_][\w.]*|\d+(?:\.\d+)?|[^\sA-Za-z_'\d]/g;
+
+const isVqlKeyword = (tok) => /^[A-Za-z_]+$/.test(tok) && VQL_KEYWORD_SET.has(tok.toUpperCase());
+
+function highlightVql(text) {
+  let html = "";
+  for (const tok of text.match(VQL_TOKEN_RE) || []) {
+    if (tok[0] === "'") html += `<span class="hl-str">${esc(tok)}</span>`;
+    else if (isVqlKeyword(tok)) html += `<span class="hl-kw">${esc(tok)}</span>`;
+    else html += esc(tok);
+  }
+  return html;
+}
+
+// Called after anything rewrites the editor — typing, inserts, history, tab
+// switches — to repaint the layers and keep the tab's copy current.
+function editorChanged() {
+  if (!WINDOW_MODE) return;
+  paintEditor();
+  const tab = activeTab();
+  if (tab && tab.query !== vqlInput.value) {
+    const before = tabLabel(tab);
+    tab.query = vqlInput.value;
+    // Untitled tabs follow the FROM clause; skip the rebuild when they don't move.
+    if (tabLabel(tab) !== before) renderQueryTabs();
+    persistTabsSoon();
+  }
+}
+
+function paintEditor() {
+  const text = vqlInput.value;
+  // A <pre> gives a trailing newline no line of its own, so the caret's last
+  // line would have nothing under it.
+  editorHl.innerHTML = highlightVql(text) + (text.endsWith("\n") ? " " : "");
+  const lines = text.split("\n").length;
+  editorGutter.textContent = Array.from({ length: lines }, (_, i) => i + 1).join("\n");
+  fitEditor();
+  syncEditorScroll();
+}
+
+// Grows with the query up to a share of the window, then scrolls; the results
+// card takes whatever height is left.
+function fitEditor() {
+  if (!WINDOW_MODE) return;
+  const max = Math.max(220, Math.round(window.innerHeight * 0.45));
+  vqlInput.style.height = "auto";
+  // offsetHeight - clientHeight is the horizontal scrollbar when a line runs
+  // long; without it the last line hides under the bar.
+  const want = vqlInput.scrollHeight + (vqlInput.offsetHeight - vqlInput.clientHeight);
+  vqlInput.style.height = `${Math.min(want, max)}px`;
+}
+
+function syncEditorScroll() {
+  editorHl.scrollTop = vqlInput.scrollTop;
+  editorHl.scrollLeft = vqlInput.scrollLeft;
+  editorGutter.scrollTop = vqlInput.scrollTop;
+}
+
+// ---- Format ---------------------------------------------------------------
+const VQL_BREAK_BEFORE = new Set([
+  "FROM", "WHERE", "FIND", "HAVING", "LIMIT", "OFFSET", "PAGESIZE", "PAGEOFFSET", "MAXROWS", "SKIP",
+]);
+
+// One clause per line, AND/OR indented under WHERE, keywords upper-cased, a
+// long SELECT list wrapped under its first field. Only the top level is
+// touched: a subquery in the SELECT list stays on its line.
+function formatVql(src) {
+  const toks = src.trim().match(VQL_TOKEN_RE) || [];
+  const nextWord = (i) => {
+    for (let j = i + 1; j < toks.length; j++) if (!/^\s/.test(toks[j])) return toks[j].toUpperCase();
+    return "";
+  };
+  const lineLength = (s) => s.length - s.lastIndexOf("\n") - 1;
+
+  let out = "";
+  let depth = 0;
+  let inSelect = false;
+  let inBetween = false;
+  for (let i = 0; i < toks.length; i++) {
+    let t = toks[i];
+    if (/^\s/.test(t)) {
+      if (out && !/[ \n]$/.test(out)) out += " ";
+      continue;
+    }
+    if (t === ",") {
+      out = `${out.replace(/ $/, "")}, `;
+      continue;
+    }
+    if (t === "(") depth++;
+    else if (t === ")") depth = Math.max(0, depth - 1);
+    else if (isVqlKeyword(t)) {
+      const up = t.toUpperCase();
+      t = up;
+      if (depth === 0 && out) {
+        const clause = VQL_BREAK_BEFORE.has(up) || ((up === "ORDER" || up === "GROUP") && nextWord(i) === "BY");
+        // The AND inside BETWEEN … AND … is part of one condition.
+        const joiner = (up === "AND" && !inBetween) || up === "OR";
+        if (clause) out = `${out.replace(/ $/, "")}\n`;
+        else if (joiner) out = `${out.replace(/ $/, "")}\n  `;
+      }
+      if (depth === 0) {
+        if (up === "SELECT") inSelect = true;
+        if (up === "FROM") inSelect = false;
+        if (up === "BETWEEN") inBetween = true;
+        else if (up === "AND") inBetween = false;
+      }
+    }
+    if (inSelect && depth === 0 && out.endsWith(", ") && lineLength(out) + t.length > 78) {
+      out = `${out.slice(0, -1)}\n       `;
+    }
+    out += t;
+  }
+  return out;
+}
+
+function formatEditor() {
+  const src = vqlInput.value;
+  if (!src.trim()) return;
+  const formatted = formatVql(src);
+  if (formatted === src) return;
+  // Through execCommand rather than .value so Ctrl+Z can take the format back.
+  vqlInput.focus();
+  vqlInput.select();
+  if (!document.execCommand("insertText", false, formatted)) vqlInput.value = formatted;
+  hideAc();
+  historyNavIndex = -1;
+  editorChanged();
+}
+
+// ---- Select-list helpers (shift-click a field) ------------------------------
+// The span of the top-level SELECT list: from after SELECT up to its FROM,
+// skipping anything inside parentheses or quotes.
+function vqlSelectListSpan(q) {
+  const re = new RegExp(VQL_TOKEN_RE.source, "g");
+  let depth = 0;
+  let start = -1;
+  let m;
+  while ((m = re.exec(q))) {
+    const t = m[0];
+    if (t === "(") depth++;
+    else if (t === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0 && /^select$/i.test(t) && start === -1) start = m.index + t.length;
+    else if (depth === 0 && /^from$/i.test(t) && start !== -1) return { start, end: m.index };
+  }
+  return null;
+}
+
+function vqlSplitTopLevel(list) {
+  const parts = [];
+  let depth = 0;
+  let cur = "";
+  for (const t of list.match(VQL_TOKEN_RE) || []) {
+    if (t === "(") depth++;
+    else if (t === ")") depth = Math.max(0, depth - 1);
+    if (t === "," && depth === 0) {
+      parts.push(cur);
+      cur = "";
+    } else {
+      cur += t;
+    }
+  }
+  parts.push(cur);
+  return parts;
+}
+
+// ---- Limit ----------------------------------------------------------------
+function uiRowLimit() {
+  if (!WINDOW_MODE) return null;
+  const n = Number(limitSelect.value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// ---- Query tabs -------------------------------------------------------------
+// Tabs keep their queries in storage; results live in memory only, since a
+// result set can run to thousands of rows.
+let queryTabs = [];
+let activeTabId = null;
+let renamingTabId = null;
+let persistTabsTimer = null;
+const tabResults = new Map();
+
+const blankTab = () => ({
+  id: `q${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+  title: null,
+  query: "",
+});
+
+function activeTab() {
+  return queryTabs.find((t) => t.id === activeTabId) || null;
+}
+
+// An untitled tab is named after the object it queries — its label when the
+// model is loaded, the API name otherwise.
+function derivedTabLabel(t) {
+  const m = (t.query || "").match(/\bFROM\s+(\w+)/i);
+  if (!m) return "New query";
+  const obj = state.dataModel?.objects.find((o) => o.name.toLowerCase() === m[1].toLowerCase());
+  return obj?.label || m[1];
+}
+
+function tabLabel(t) {
+  return t.title || derivedTabLabel(t);
+}
+
+function persistTabs() {
+  clearTimeout(persistTabsTimer);
+  if (!queryTabs.length) return;
+  chrome.storage.local.set({
+    queryTabs: {
+      active: activeTabId,
+      tabs: queryTabs.map(({ id, title, query }) => ({ id, title, query })),
+    },
+  });
+}
+
+function persistTabsSoon() {
+  clearTimeout(persistTabsTimer);
+  persistTabsTimer = setTimeout(persistTabs, 400);
+}
+
+function renderQueryTabs() {
+  if (!WINDOW_MODE || renamingTabId) return;
+  let html = "";
+  for (const t of queryTabs) {
+    const on = t.id === activeTabId;
+    const label = tabLabel(t);
+    const preview = t.query.trim() ? t.query.trim().slice(0, 300) : "Empty query";
+    const tip = on ? `${preview}\n\nDouble-click to rename` : preview;
+    html +=
+      `<div class="qtab${on ? " active" : ""}" role="tab" tabindex="${on ? 0 : -1}" ` +
+      `aria-selected="${on}" data-tab-id="${esc(t.id)}" title="${esc(tip)}">` +
+      `<span class="qtab-label">${esc(label)}</span>` +
+      (on
+        ? `<button type="button" class="qtab-close" data-close="${esc(t.id)}" title="Close tab" aria-label="Close ${esc(label)}">&times;</button>`
+        : "") +
+      "</div>";
+  }
+  html += '<button type="button" class="qtab-new" title="New query tab" aria-label="New query tab">+</button>';
+  queryTabsEl.innerHTML = html;
+}
+
+// Results land in whatever tab is showing when they arrive, so the tabs hold
+// still while a query runs.
+function setQueryBusy(on) {
+  if (!WINDOW_MODE) return;
+  queryTabsEl.classList.toggle("busy", on);
+}
+
+function stashActiveTab() {
+  const t = activeTab();
+  if (!t) return;
+  t.query = vqlInput.value;
+  tabResults.set(t.id, snapshotResults());
+}
+
+function loadActiveTab() {
+  const t = activeTab();
+  vqlInput.value = t ? t.query : "";
+  historyNavIndex = -1;
+  hideAc();
+  paintEditor();
+  vqlInput.scrollTop = 0;
+  vqlInput.scrollLeft = 0;
+  syncEditorScroll();
+  restoreResults(tabResults.get(activeTabId));
+  renderQueryTabs();
+  renderRecent();
+}
+
+function switchQueryTab(id) {
+  if (id === activeTabId || activeQueryToken || !queryTabs.some((t) => t.id === id)) return;
+  stashActiveTab();
+  activeTabId = id;
+  loadActiveTab();
+  persistTabs();
+}
+
+function newQueryTab() {
+  if (activeQueryToken) return;
+  stashActiveTab();
+  const t = blankTab();
+  queryTabs.push(t);
+  activeTabId = t.id;
+  loadActiveTab();
+  persistTabs();
+  vqlInput.focus();
+  queryTabsEl.scrollLeft = queryTabsEl.scrollWidth;
+}
+
+function closeQueryTab(id) {
+  const i = queryTabs.findIndex((t) => t.id === id);
+  if (i === -1) return;
+  const closingActive = id === activeTabId;
+  if (closingActive && activeQueryToken) return;
+  const edits = closingActive ? pendingEdits : tabResults.get(id)?.edits || {};
+  const unsaved = Object.keys(edits).length;
+  if (unsaved && !confirm(`Close this tab and discard ${unsaved} unsaved change${unsaved === 1 ? "" : "s"}?`)) return;
+
+  queryTabs.splice(i, 1);
+  tabResults.delete(id);
+  // The strip never goes empty; closing the last tab leaves a fresh one.
+  if (!queryTabs.length) queryTabs.push(blankTab());
+  if (closingActive) {
+    activeTabId = queryTabs[Math.min(i, queryTabs.length - 1)].id;
+    loadActiveTab();
+  } else {
+    renderQueryTabs();
+    renderRecent();
+  }
+  persistTabs();
+}
+
+function renameQueryTab(id) {
+  const t = queryTabs.find((x) => x.id === id);
+  const label = queryTabsEl.querySelector(`.qtab[data-tab-id="${CSS.escape(id)}"] .qtab-label`);
+  if (!t || !label) return;
+  renamingTabId = id;
+  const input = document.createElement("input");
+  input.className = "qtab-rename";
+  input.value = tabLabel(t);
+  input.maxLength = 60;
+  input.size = Math.max(8, input.value.length);
+  input.setAttribute("aria-label", "Tab name");
+  label.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const finish = (commit) => {
+    if (done) return;
+    done = true;
+    renamingTabId = null;
+    if (commit) {
+      // Clearing the name, or leaving the one it already had, hands the tab
+      // back to following its query.
+      const v = input.value.trim();
+      t.title = v && v !== derivedTabLabel(t) ? v : null;
+      persistTabs();
+    }
+    renderQueryTabs();
+    renderRecent();
+  };
+  input.addEventListener("input", () => (input.size = Math.max(8, input.value.length)));
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      finish(true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      finish(false);
+    }
+  });
+}
+
+// Everything the results area shows, so a tab comes back exactly as it was
+// left: rows, unsaved edits, filter, page, hidden columns and selection.
+function snapshotResults() {
+  return {
+    table: resultsView.active,
+    message: resultsView.active ? "" : resultsContainer.innerHTML,
+    rows: queryRows,
+    keys: resultKeys,
+    objectName: queryObjectName,
+    data: lastResultData,
+    edits: pendingEdits,
+    view: resultsView,
+    count: resultsCount.textContent,
+    shown: resultsPanel.classList.contains("has-results"),
+  };
+}
+
+function restoreResults(s) {
+  closeColumnsMenu();
+  resultsPanel.querySelector(".save-error")?.remove();
+  if (!s) {
+    queryRows = [];
+    resultKeys = [];
+    queryObjectName = null;
+    lastResultData = null;
+    pendingEdits = {};
+    resultsContainer.innerHTML = "";
+    resultsCount.textContent = "";
+    setResultsShown(false);
+    resetResultsView();
+    updateSaveBar();
+    return;
+  }
+  queryRows = s.rows;
+  resultKeys = s.keys;
+  queryObjectName = s.objectName;
+  lastResultData = s.data;
+  pendingEdits = s.edits;
+  resultsView = s.view;
+  resultsCount.textContent = s.count;
+  resultsFilter.value = resultsView.filter;
+  setResultsShown(s.shown);
+  paintColumnsButton();
+  if (s.table) {
+    paintResultsView();
+  } else {
+    resultsContainer.innerHTML = s.message;
+    resultsPanel.classList.remove("has-table");
+  }
+  updateSaveBar();
+  renderInspector();
+}
+
+// ---- Results view -----------------------------------------------------------
+// The workbench pages the table instead of rendering every row: a fetch-all
+// query can return tens of thousands, and the card has a fixed height anyway.
+const RESULTS_PAGE = 100;
+
+let resultKeys = [];
+let resultsView = freshResultsView();
+
+function freshResultsView() {
+  return { active: false, filter: "", page: 0, hidden: new Set(), selected: null };
+}
+
+function resetResultsView() {
+  resultsView = freshResultsView();
+  if (!WINDOW_MODE) return;
+  resultsFilter.value = "";
+  resultsPanel.classList.remove("has-table");
+  closeColumnsMenu();
+  paintColumnsButton();
+  renderInspector();
+}
+
+function displayValue(v) {
+  if (v === null || v === undefined) return "";
+  return typeof v === "object" ? JSON.stringify(v) : String(v);
+}
+
+// What the cell shows: an unsaved edit wins over what Vault returned.
+function effectiveValue(ri, key) {
+  const edit = pendingEdits[`${ri}:${key}`];
+  return edit ? edit.newVal : displayValue(queryRows[ri]?.[key]);
+}
+
+function visibleRowIndices() {
+  const f = resultsView.filter.trim().toLowerCase();
+  const out = [];
+  for (let ri = 0; ri < queryRows.length; ri++) {
+    if (!f || resultKeys.some((k) => effectiveValue(ri, k).toLowerCase().includes(f))) out.push(ri);
+  }
+  return out;
+}
+
+const STATUS_COL_RE = /(^|_)(status|state)__[a-z]+$/i;
+const NAME_COL_RE = /^(name|title|label)__[a-z]+$/i;
+
+// Tone for a lifecycle value — a reading aid only; the value itself is always
+// printed in the pill.
+function statusTone(value) {
+  const s = value.toLowerCase();
+  if (/inactive|reject|cancel|withdrawn|expired|obsolete|retired|fail|error/.test(s)) return "bad";
+  if (/approved|active|effective|released|available|complete|final|current|steady/.test(s)) return "ok";
+  if (/draft|review|pending|progress|planned|open/.test(s)) return "warn";
+  return "neutral";
+}
+
+// Inner HTML for a data cell. The overlay prints plain text; the workbench
+// pills status values and sets names in the reading face.
+function cellContent(key, value) {
+  if (!WINDOW_MODE || value === "") return esc(value);
+  if (STATUS_COL_RE.test(key)) return `<span class="cell-pill ${statusTone(value)}">${esc(value)}</span>`;
+  if (NAME_COL_RE.test(key)) return `<span class="cell-text">${esc(value)}</span>`;
+  return esc(value);
+}
+
+// Vault's own deep links (Vault Help: "Vault Document URLs" and "Viewing Object
+// Records"): /ui/#doc_info/{id} for documents, /ui/#object/{object}/{id} for
+// object records.
+function recordUrl(row) {
+  const id = displayValue(row?.id);
+  if (!id || !state.domain || !queryObjectName) return "";
+  const path = queryObjectName.toLowerCase() === "documents"
+    ? `doc_info/${encodeURIComponent(id)}`
+    : `object/${encodeURIComponent(queryObjectName)}/${encodeURIComponent(id)}`;
+  return `https://${state.domain}/ui/#${path}`;
+}
+
+function paintResultsView() {
+  if (!WINDOW_MODE) return;
+  resultsView.active = true;
+  const idx = visibleRowIndices();
+  const pages = Math.max(1, Math.ceil(idx.length / RESULTS_PAGE));
+  resultsView.page = Math.min(resultsView.page, pages - 1);
+  const start = resultsView.page * RESULTS_PAGE;
+  const slice = idx.slice(start, start + RESULTS_PAGE);
+  const keys = resultKeys.filter((k) => !resultsView.hidden.has(k));
+  const editable = getEditableFields(queryObjectName);
+  const hasId = resultKeys.includes("id");
+
+  let html = '<table class="results-table"><thead><tr><th class="row-num" scope="col">#</th>';
+  for (const k of keys) html += `<th scope="col"${k === "id" ? ' class="col-id"' : ""}>${esc(k)}</th>`;
+  html += "</tr></thead><tbody>";
+  for (const ri of slice) {
+    html += `<tr data-row="${ri}"${ri === resultsView.selected ? ' class="selected"' : ""}>`;
+    html += `<td class="row-num">${ri + 1}</td>`;
+    for (const k of keys) {
+      const v = effectiveValue(ri, k);
+      if (k === "id") {
+        const url = recordUrl(queryRows[ri]);
+        html += url
+          ? `<td class="col-id"><a class="id-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="Open in Vault">${esc(v)}</a></td>`
+          : `<td class="col-id" title="${esc(v)}">${esc(v)}</td>`;
+        continue;
+      }
+      const canEdit = hasId && (editable === "all" || editable.has(k));
+      const cls = canEdit ? `editable${pendingEdits[`${ri}:${k}`] ? " dirty" : ""}` : "";
+      html +=
+        `<td${cls ? ` class="${cls}" data-row="${ri}" data-field="${esc(k)}"` : ""} title="${esc(v)}">` +
+        `${cellContent(k, v)}</td>`;
+    }
+    html += "</tr>";
+  }
+  html += "</tbody></table>";
+  if (!slice.length) {
+    html = `<div class="result-message info">No rows match &ldquo;${esc(resultsView.filter.trim())}&rdquo;.</div>`;
+  }
+  resultsContainer.innerHTML = html;
+  resultsPanel.classList.add("has-table");
+
+  const total = queryRows.length;
+  const shown = idx.length;
+  const filtered = shown !== total ? ` (filtered from ${total.toLocaleString()})` : "";
+  resultsRange.textContent = shown
+    ? `Showing ${(start + 1).toLocaleString()}–${(start + slice.length).toLocaleString()} of ${shown.toLocaleString()}${filtered}`
+    : `0 of ${total.toLocaleString()}`;
+  resultsHint.textContent = hasId ? "Click a cell to edit it" : "Add id to the SELECT to edit cells";
+  pagePrev.disabled = resultsView.page === 0;
+  pageNext.disabled = resultsView.page >= pages - 1;
+}
+
+function turnResultsPage(step) {
+  if (!resultsView.active) return;
+  resultsView.page = Math.max(0, resultsView.page + step);
+  paintResultsView();
+  resultsContainer.scrollTop = 0;
+}
+
+function selectResultRow(ri) {
+  if (!Number.isInteger(ri) || !queryRows[ri] || resultsView.selected === ri) return;
+  resultsView.selected = ri;
+  resultsContainer.querySelector("tbody tr.selected")?.classList.remove("selected");
+  resultsContainer.querySelector(`tbody tr[data-row="${ri}"]`)?.classList.add("selected");
+  renderInspector();
+}
+
+function formatMs(ms) {
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
+}
+
+// ---- Columns menu -----------------------------------------------------------
+// Hides columns from the table only; Copy and the exports keep every column.
+function paintColumnsButton() {
+  const n = resultsView.hidden.size;
+  columnsBtn.textContent = n ? `Columns · ${n} hidden` : "Columns";
+}
+
+function renderColumnsMenu() {
+  columnsMenu.innerHTML =
+    '<div class="columns-head"><span>Show columns</span>' +
+    `<button type="button" class="columns-all"${resultsView.hidden.size ? "" : " disabled"}>Show all</button></div>` +
+    resultKeys
+      .map(
+        (k) =>
+          `<label class="columns-opt"><input type="checkbox" data-col="${esc(k)}"` +
+          `${resultsView.hidden.has(k) ? "" : " checked"} /><span>${esc(k)}</span></label>`
+      )
+      .join("");
+}
+
+function closeColumnsMenu() {
+  if (!WINDOW_MODE) return;
+  columnsMenu.classList.add("hidden");
+  columnsBtn.setAttribute("aria-expanded", "false");
+}
+
+// ---- Inspector --------------------------------------------------------------
+function rowTitle(ri) {
+  for (const k of ["name__v", "title__v", "label__v", "username__sys", "name__sys"]) {
+    const v = effectiveValue(ri, k);
+    if (v) return v;
+  }
+  const id = effectiveValue(ri, "id");
+  return id ? `Record ${id}` : `Row ${ri + 1}`;
+}
+
+function renderInspector() {
+  if (!WINDOW_MODE) return;
+  const ri = resultsView.selected;
+  const row = ri != null ? queryRows[ri] : null;
+  inspEmpty.classList.toggle("hidden", !!row);
+  inspBody.classList.toggle("hidden", !row);
+  if (!row) return;
+
+  inspTitle.textContent = rowTitle(ri);
+  let html = "";
+  for (const k of resultKeys) {
+    const v = effectiveValue(ri, k);
+    const cls = [v === "" ? "empty" : "", pendingEdits[`${ri}:${k}`] ? "dirty" : ""].filter(Boolean).join(" ");
+    html += `<dt title="${esc(k)}">${esc(k)}</dt>`;
+    html += `<dd${cls ? ` class="${cls}"` : ""}>${v === "" ? "&mdash;" : esc(v)}</dd>`;
+  }
+  inspFields.innerHTML = html;
+
+  const url = recordUrl(row);
+  inspOpen.classList.toggle("hidden", !url);
+  if (url) inspOpen.href = url;
+  else inspOpen.removeAttribute("href");
+}
+
+// ---- Recent queries ---------------------------------------------------------
+const RECENT_LIMIT = 8;
+
+function relativeTime(ts) {
+  if (!ts) return "Earlier";
+  const mins = Math.floor((Date.now() - ts) / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins} min ago`;
+  const d = new Date(ts);
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) return "Earlier today";
+  today.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Yesterday";
+  return d.toLocaleDateString();
+}
+
+function renderRecent() {
+  if (!WINDOW_MODE) return;
+  const items = state.history.slice(0, RECENT_LIMIT);
+  if (!items.length) {
+    recentList.innerHTML = '<div class="insp-empty recent-empty">Queries you run show up here.</div>';
+    return;
+  }
+  recentList.innerHTML = items
+    .map((h, i) => {
+      const meta = [relativeTime(h.ts)];
+      const tab = h.tab && queryTabs.find((t) => t.id === h.tab);
+      if (tab) meta.push(tab.id === activeTabId ? "this tab" : `${tabLabel(tab)} tab`);
+      const failed = h.success === false;
+      return (
+        `<button type="button" class="recent-item" data-index="${i}" title="${esc(h.query)}">` +
+        `<span class="recent-q">${esc(h.query.replace(/\s+/g, " "))}</span>` +
+        `<span class="recent-meta">${esc(meta.join(" · "))}` +
+        `${failed ? ' · <span class="recent-fail">failed</span>' : ""}</span>` +
+        "</button>"
+      );
+    })
+    .join("");
+}
+
+// ---- Data model sidebar -----------------------------------------------------
+function wbTypeLabel(type) {
+  const t = String(type || "").toLowerCase();
+  return t === "objectreference" ? "object" : t;
+}
+
+const DM_CHEVRON =
+  '<svg class="dm-group-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="3" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+
+function wbGroupRowHtml(obj, countText, filter, opts = {}) {
+  const { expandable = false, expanded = false } = opts;
+  const tip = expandable
+    ? `${obj.label || obj.name} · ${obj.fields.length} fields`
+    : `Insert SELECT … FROM ${obj.name}`;
+  let h =
+    `<div class="dm-group${expanded ? " expanded" : ""}${expandable ? "" : " dm-group-hit"}" ` +
+    `data-obj="${esc(obj.name)}" title="${esc(tip)}" role="button" tabindex="0"` +
+    `${expandable ? ` aria-expanded="${expanded}"` : ""}>`;
+  if (expandable) h += DM_CHEVRON;
+  h += `<span class="dm-group-label">${highlight(obj.label || obj.name, filter)}</span>`;
+  h += `<span class="dm-group-api">${highlight(obj.name, filter)}</span>`;
+  h += `<span class="dm-group-count">${esc(countText)}</span>`;
+  if (expandable) {
+    h += `<button type="button" class="dm-group-sel" data-sel="${esc(obj.name)}" title="Insert SELECT … FROM ${esc(obj.name)} with every field">SEL</button>`;
+  }
+  return `${h}</div>`;
+}
+
+function wbFieldRowHtml(f, objName, filter) {
+  const type = wbTypeLabel(f.type);
+  const tip = [f.label && f.label !== f.name ? f.label : "", type, f.required ? "required" : ""]
+    .filter(Boolean)
+    .join(" · ");
+  // A search that matched the label rather than the API name shows the label,
+  // or the row would appear with nothing highlighted.
+  const labelHit =
+    filter && f.label && !f.name.toLowerCase().includes(filter) && f.label.toLowerCase().includes(filter);
+  return (
+    `<button type="button" class="dm-row" data-field="${esc(f.name)}" data-obj="${esc(objName)}" title="${esc(tip)}">` +
+    `<span class="dm-row-name">${highlight(f.name, filter)}</span>` +
+    (f.required ? '<span class="dm-row-req" aria-label="required">*</span>' : "") +
+    (labelHit ? `<span class="dm-row-label">${highlight(f.label, filter)}</span>` : "") +
+    `<span class="dm-row-type">${esc(type)}</span>` +
+    "</button>"
+  );
+}
+
+function wbObjectHtml(obj, compact) {
+  const open = dmExpanded.has(obj.name);
+  if (compact && !open) {
+    return (
+      `<div class="dm-group dm-group-line" data-obj="${esc(obj.name)}" role="button" tabindex="0" aria-expanded="false" ` +
+      `title="${esc(`${obj.label || obj.name} · ${obj.fields.length} fields`)}">` +
+      `<span class="dm-group-api">${esc(obj.name)}</span>` +
+      `<span class="dm-group-count">${obj.fields.length}</span></div>`
+    );
+  }
+  let html = `<div class="dm-obj${open ? " open" : ""}">`;
+  html += wbGroupRowHtml(obj, String(obj.fields.length), "", { expandable: true, expanded: open });
+  if (open) {
+    const ranked = [...obj.fields].sort(fieldRanker(obj));
+    const shown = dmShowAll.has(obj.name) ? ranked : ranked.slice(0, DM_TOP_FIELDS);
+    html += '<div class="dm-fields">';
+    for (const f of shown) html += wbFieldRowHtml(f, obj.name, "");
+    const more = ranked.length - shown.length;
+    if (more > 0) {
+      html += `<button type="button" class="dm-group-more" data-more="${esc(obj.name)}">+ ${more.toLocaleString()} more field${more === 1 ? "" : "s"}</button>`;
+    }
+    html += "</div>";
+  }
+  return `${html}</div>`;
+}
+
+function wbObjectIndexHtml(featured, rest) {
+  let html = "";
+  if (featured.length) {
+    html += '<div class="dm-section">Most used</div>';
+    for (const obj of featured) html += wbObjectHtml(obj, false);
+  }
+  html += `<div class="dm-section">${featured.length ? "All objects" : "Objects"} · ${rest.length.toLocaleString()}</div>`;
+  for (const obj of rest) html += wbObjectHtml(obj, true);
+  return html;
+}
 
 // ===================== UTILS =====================
 // Escapes for both text and quoted-attribute contexts. The textContent round

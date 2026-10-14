@@ -20,13 +20,20 @@
         <button class="tab" data-tab="ask">Ask</button>
       </div>
 
-      <div id="status-pill" class="status-pill disconnected" title="Disconnected">
-        <span class="status-dot"></span>
-        <span id="status-text">Disconnected</span>
+      <!-- One pill in full-window mode (vault · user); both wrappers are
+           display:contents in the overlay, so its layout is unchanged. -->
+      <div class="topbar-conn">
+        <div class="conn-pill">
+          <div id="status-pill" class="status-pill disconnected" title="Disconnected">
+            <span class="status-dot"></span>
+            <span id="status-text">Disconnected</span>
+          </div>
+          <div id="topbar-user" class="topbar-user"></div>
+        </div>
       </div>
-      <div id="topbar-user" class="topbar-user"></div>
 
       <div id="topbar-chip-slot" class="topbar-chip-slot"></div>
+      <span class="topbar-sep topbar-sep-chips window-only"></span>
 
       <button id="history-btn" class="topbar-icon hidden" title="Query history">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
@@ -37,12 +44,12 @@
       <button id="disconnect-btn" class="topbar-icon hidden" title="Disconnect">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
       </button>
-      <span class="topbar-sep"></span>
+      <span class="topbar-sep topbar-sep-window"></span>
       <button id="expand-btn" class="topbar-icon topbar-icon-accent" title="Open full window">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
       </button>
-      <button id="collapse-btn" class="topbar-icon topbar-icon-accent hidden" title="Back to popup">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+      <button id="collapse-btn" class="topbar-icon topbar-icon-accent hidden" title="Back to popup" aria-label="Exit full screen">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
       </button>
       <button id="close-btn" class="topbar-icon topbar-icon-danger" title="Close">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -114,6 +121,8 @@
       <!-- Query Tab -->
       <div id="tab-query" class="tab-content active">
         <div class="card query-card">
+          <!-- Full-window only: one editor, several saved queries. -->
+          <div id="query-tabs" class="query-tabs window-only" role="tablist" aria-label="Query tabs"></div>
           <div id="operator-bar" class="operator-bar">
             <button class="op-chip" data-op="WHERE" title="Insert WHERE clause">WHERE</button>
             <button class="op-chip" data-op="AND" title="Insert AND">AND</button>
@@ -149,14 +158,34 @@
                 <span id="dt-chip-label" class="model-chip-label">LOAD TYPES</span>
               </button>
             </div>
+            <!-- Full-window only. Clear, Cancel and Run are moved in here by
+                 popup.js, so the overlay keeps them under the editor. -->
+            <div id="editor-tools" class="editor-tools window-only">
+              <button id="format-btn" class="tool-btn" type="button" title="Reflow the query one clause per line and upper-case keywords">Format</button>
+              <label class="limit-field" title="Most rows to fetch when the query has no LIMIT of its own">Limit
+                <select id="limit-select">
+                  <option value="100">100</option>
+                  <option value="500">500</option>
+                  <option value="1000">1000</option>
+                  <option value="">All</option>
+                </select>
+              </label>
+            </div>
           </div>
           <div class="textarea-wrapper">
-            <textarea
-              id="vql-input"
-              rows="4"
-              placeholder="SELECT id, name__v, status__v FROM documents"
-              spellcheck="false"
-            ></textarea>
+            <!-- Gutter and highlight layer are full-window only: the textarea
+                 draws the caret and selection over a highlighted copy. -->
+            <div id="editor-gutter" class="editor-gutter window-only" aria-hidden="true"></div>
+            <div class="editor-code">
+              <pre id="editor-hl" class="editor-hl window-only" aria-hidden="true"></pre>
+              <textarea
+                id="vql-input"
+                rows="4"
+                placeholder="SELECT id, name__v, status__v FROM documents"
+                spellcheck="false"
+                aria-label="VQL query"
+              ></textarea>
+            </div>
             <div id="autocomplete-dropdown" class="autocomplete-dropdown hidden"></div>
           </div>
           <div class="query-actions">
@@ -168,11 +197,24 @@
         </div>
 
         <div id="results-panel" class="results-panel">
-          <div id="results-header" class="results-header hidden">
-            <span id="results-count"></span>
-            <button id="copy-btn" class="btn btn-small btn-outline">Copy JSON</button>
-            <button id="export-csv-btn" class="btn btn-small btn-outline">Export CSV</button>
-            <button id="export-xlsx-btn" class="btn btn-small btn-outline">Export Excel</button>
+          <!-- The controls only show once there are rows (.has-results); in
+               full-window mode the title stays as the card's heading. -->
+          <div id="results-header" class="results-header">
+            <h2 class="results-title window-only">Results</h2>
+            <span id="results-count" class="results-count"></span>
+            <label class="results-filter window-only">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+              <input type="search" id="results-filter" placeholder="Filter results" aria-label="Filter results" spellcheck="false" />
+            </label>
+            <div class="results-actions">
+              <div class="columns-wrap window-only">
+                <button id="columns-btn" class="btn btn-small btn-outline" aria-haspopup="true" aria-expanded="false">Columns</button>
+                <div id="columns-menu" class="columns-menu hidden"></div>
+              </div>
+              <button id="copy-btn" class="btn btn-small btn-outline">Copy JSON</button>
+              <button id="export-csv-btn" class="btn btn-small btn-outline">Export CSV</button>
+              <button id="export-xlsx-btn" class="btn btn-small btn-outline">Export Excel</button>
+            </div>
           </div>
           <div id="results-container"></div>
           <div id="save-bar" class="save-bar hidden">
@@ -180,9 +222,35 @@
             <button id="discard-btn" class="btn btn-small btn-outline">Discard</button>
             <button id="save-btn" class="btn btn-small btn-primary">Save Changes</button>
           </div>
+          <div id="results-footer" class="results-footer window-only">
+            <span id="results-range"></span>
+            <span id="results-hint" class="results-hint"></span>
+            <div class="pager">
+              <button id="page-prev" class="btn btn-small btn-outline" type="button">Prev</button>
+              <button id="page-next" class="btn btn-small btn-outline" type="button">Next</button>
+            </div>
+          </div>
         </div>
 
       </div>
+
+      <!-- Inspector — full-window only, beside the Query tab. -->
+      <aside id="inspector" class="inspector window-only" aria-label="Inspector">
+        <section class="insp-row">
+          <div class="insp-label">Selected row</div>
+          <div id="insp-empty" class="insp-empty">Select a row in the results to see every field it returned.</div>
+          <div id="insp-body" class="insp-body hidden">
+            <div id="insp-title" class="insp-title"></div>
+            <dl id="insp-fields" class="insp-fields"></dl>
+            <div class="insp-actions">
+              <a id="insp-open" class="insp-btn" target="_blank" rel="noopener noreferrer">Open in Vault</a>
+              <button id="insp-copy" class="insp-btn" type="button">Copy JSON</button>
+            </div>
+          </div>
+        </section>
+        <div class="insp-label insp-label-recent">Recent queries</div>
+        <div id="recent-list" class="recent-list"></div>
+      </aside>
 
       <!-- Data Models Tab -->
       <div id="tab-datamodel" class="tab-content">
@@ -197,8 +265,9 @@
 
           <div class="dm-search-field">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/></svg>
-            <input type="text" id="dm-search" placeholder="Search objects and fields…" />
+            <input type="text" id="dm-search" placeholder="Search objects and fields…" aria-label="Search objects and fields" />
             <button id="dm-search-clear" class="dm-search-clear hidden" title="Clear search">&times;</button>
+            <kbd class="dm-search-key window-only" title="Press / to search">/</kbd>
           </div>
 
           <div id="dm-filters" class="dm-filters hidden">
@@ -213,6 +282,8 @@
             <span id="dm-showing"></span>
             <button id="dm-show-more" class="dm-show-more">Show more</button>
           </div>
+
+          <div class="dm-foot window-only">Click a field to insert it at the cursor · ⇧-click to add it to SELECT</div>
         </div>
       </div>
 
