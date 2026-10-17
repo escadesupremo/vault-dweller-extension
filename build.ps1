@@ -1,4 +1,4 @@
-# Builds the Chrome Web Store package.
+﻿# Builds the Chrome Web Store package.
 #
 # Ships an explicit allow-list, never the folder: the repo also holds .git/, the
 # build output, and the privacy page that GitHub Pages serves, none of which
