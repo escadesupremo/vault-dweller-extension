@@ -123,8 +123,8 @@ if (WINDOW_MODE) {
   editorTools.append(clearBtn, cancelBtn, runBtn);
   runBtn.innerHTML = RUN_LABEL;
   runBtn.title =
-    "Runs the query and fetches every page concurrently, up to the Limit when the " +
-    "query has no LIMIT of its own. For stable paging on large sets, include an ORDER BY.";
+    `Run (${IS_MAC ? "⌘" : "Ctrl"}+Enter). Fetches every page concurrently, up to the Limit when ` +
+    "the query has no LIMIT of its own. For stable paging on large sets, include an ORDER BY.";
   resultsContainer.dataset.empty = `Run a query to see its rows here · ${RUN_KEY_LABEL}`;
 }
 

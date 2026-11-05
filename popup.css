@@ -2916,7 +2916,9 @@ body.mode-window #tab-datamodel {
   display: flex;
   flex-direction: column;
   order: -1;
-  width: clamp(280px, 22vw, 320px);
+  /* Both side columns give up a little at laptop widths, so at 1280px the
+     editor and results toolbars still fit on one line each. */
+  width: clamp(260px, 21vw, 320px);
   flex-shrink: 0;
   min-height: 0;
   background: var(--white);
@@ -3224,6 +3226,7 @@ body.mode-window #tab-query {
 /* Query card: tab strip, toolbar, editor. No overflow clipping — the date menu
    and autocomplete hang out of it. */
 body.mode-window .query-card {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -3435,6 +3438,12 @@ body.mode-window .editor-tools #run-btn:disabled { opacity: .75; }
   color: #b8b2a3;
 }
 
+/* The shortcut is the first thing to go when the toolbar runs short; the
+   button's tooltip still names it. */
+@container (max-width: 780px) {
+  .run-key { display: none; }
+}
+
 /* Run sits under the editor in the overlay; here it is on the toolbar and the
    timing moves into the results readout. */
 body.mode-window .query-actions { display: none; }
@@ -3539,7 +3548,7 @@ body.mode-window .results-panel:not(.has-results) .results-header { display: fle
 
 body.mode-window .results-header {
   flex-wrap: wrap;
-  gap: 8px 16px;
+  gap: 8px 12px;
   margin: 0;
   padding: 10px 12px;
   border-bottom: 1px solid var(--rule);
@@ -3569,10 +3578,10 @@ body.mode-window .results-count {
    grows into whatever the row has left. */
 .results-filter {
   display: flex;
-  flex: 1 1 150px;
+  flex: 1 1 120px;
   align-items: center;
   gap: 6px;
-  min-width: 140px;
+  min-width: 120px;
   max-width: 260px;
   height: 30px;
   padding: 0 8px;
@@ -3826,7 +3835,7 @@ body.mode-window .results-footer .btn:disabled { opacity: .45; cursor: default; 
 body.mode-window .inspector {
   display: flex;
   flex-direction: column;
-  width: clamp(260px, 20vw, 300px);
+  width: clamp(240px, 19vw, 300px);
   flex-shrink: 0;
   min-height: 0;
   overflow-y: auto;
